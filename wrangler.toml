@@ -17,7 +17,7 @@ not_found_handling = "single-page-application"
 # （Workers & Pages → KV → 点你的命名空间 → 详情页的 ID，形如 32 位十六进制）
 [[kv_namespaces]]
 binding = "TMH_KV"
-id = "b1110a2727c141beac7835a7930b338d"
+id = "ac41ff9c68664269a5ba77319228c5d3"
 
 [vars]
 # 首次部署的默认管理员账号（部署后仍可在管理后台网页修改，修改后写入 KV 覆盖此处）
