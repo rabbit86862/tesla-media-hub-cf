@@ -7,9 +7,9 @@
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { width: 100vw; height: 100vh; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; display: flex; }
+    html, body { width: 100vw; height: 100vh; background: #000; color: #fff; font-family: -apple-system, sans-serif; overflow: hidden; display: flex; }
     
-    #sidebar { width: 200px; background: #16181d; display: flex; flex-direction: column; z-index: 10; border-right: 1px solid #333; }
+    #sidebar { width: 220px; min-width: 220px; background: #16181d; display: flex; flex-direction: column; z-index: 10; border-right: 1px solid #333; }
     .header { padding: 14px; font-weight: bold; border-bottom: 1px solid #333; display: flex; justify-content: space-between; }
     .header a { color: #3e88f7; text-decoration: none; font-size: 13px; }
     .channel-list { flex: 1; overflow-y: auto; }
@@ -19,23 +19,21 @@
     #main { flex: 1; position: relative; background: #000; display: flex; justify-content: center; align-items: center; }
     video { width: 100%; height: 100%; object-fit: contain; }
     
-    /* 核心：覆盖在屏幕中央的强制激活大按钮 */
     #action-btn {
       position: absolute;
-      padding: 16px 32px;
-      font-size: 18px;
+      padding: 14px 28px;
+      font-size: 16px;
       font-weight: bold;
       color: #fff;
       background: #007aff;
       border: none;
       border-radius: 8px;
       cursor: pointer;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
       z-index: 30;
       display: none;
     }
     
-    #log { position: absolute; bottom: 20px; left: 20px; font-size: 12px; color: #aaa; background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 4px; pointer-events: none; z-index: 20; }
+    #log { position: absolute; bottom: 20px; left: 20px; font-size: 12px; color: #ccc; background: rgba(0,0,0,0.8); padding: 8px 12px; border-radius: 4px; pointer-events: none; z-index: 20; max-width: 80%; }
   </style>
 </head>
 <body>
@@ -48,20 +46,19 @@
   </div>
 
   <div id="main">
-    <button id="action-btn" onclick="userTriggerPlay()">▶ 点击开始播放 (开启声音)</button>
-    <!-- 必须显式写上 muted，Mac 和车机才不会卡住转圈 -->
+    <button id="action-btn" onclick="userTriggerPlay()">▶ 点击播放 (开启声音)</button>
     <video id="video" controls playsinline webkit-playsinline muted></video>
-    <div id="log">准备加载...</div>
+    <div id="log">准备中...</div>
   </div>
 
   <script>
-    // 经多网络测试、长期存活的高可用测试源列表
+    // 经多端验证的公网真实切片源
     const channels = [
+      { name: "国际测试 (验证播放核心)", url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" },
       { name: "CCTV-13 新闻", url: "https://cctv13.live.cntv.my/live/cctv13.m3u8" },
       { name: "CCTV-1 综合", url: "https://cctv1.live.cntv.my/live/cctv1.m3u8" },
       { name: "CCTV-4 中文国际", url: "https://cctv4.live.cntv.my/live/cctv4.m3u8" },
-      { name: "凤凰资讯台", url: "https://fhhd.live.cntv.my/live/fhzx.m3u8" },
-      { name: "国际测试流 (BigBuckBunny)", url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" }
+      { name: "凤凰资讯台", url: "https://fhhd.live.cntv.my/live/fhzx.m3u8" }
     ];
 
     const video = document.getElementById('video');
@@ -75,12 +72,12 @@
     }
 
     function userTriggerPlay() {
-      video.muted = false; // 解除静音
+      video.muted = false;
       video.play().then(() => {
         actionBtn.style.display = 'none';
-        setLog('播放中 (已开启声音)');
+        setLog('播放中 (音视频同步)');
       }).catch(e => {
-        setLog('播放失败: ' + e.message);
+        setLog('启动播放失败: ' + e.message);
       });
     }
 
@@ -90,44 +87,52 @@
       setLog('正在加载: ' + c.name);
       actionBtn.style.display = 'none';
 
-      // 1. 如果是 Safari (支持原生 HLS)
-      if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = c.url;
-        video.play().then(() => {
-          setLog('Safari 原生起播成功');
-        }).catch(err => {
-          setLog('需要用户点击起播: ' + err.name);
-          actionBtn.style.display = 'block';
-        });
-        return;
-      }
-
-      // 2. 如果是 Chrome / 特斯拉车机 (使用 hls.js)
+      // 核心调整：只要浏览器支持 MediaSource（Mac Safari 17+ 和特斯拉 Chromium 均支持），
+      // 强行使用 hls.js 解码，绕过 Safari 容易报错的系统原生播放器！
       if (Hls.isSupported()) {
-        if (hls) hls.destroy();
-        hls = new Hls({ enableWorker: true });
+        if (hls) {
+          hls.destroy();
+        }
+
+        hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: false,
+          manifestLoadingTimeOut: 15000
+        });
 
         hls.loadSource(c.url);
         hls.attachMedia(video);
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           video.play().then(() => {
-            setLog('hls.js 起播成功 (静音模式)');
+            setLog('hls.js 解码成功，画面已呈现 (静音模式)');
           }).catch(err => {
-            setLog('浏览器拦截自动播放，请点击屏幕中央按钮');
+            setLog('浏览器等待用户手势激活');
             actionBtn.style.display = 'block';
           });
         });
 
         hls.on(Hls.Events.ERROR, (event, data) => {
           if (data.fatal) {
-            setLog('源连接异常: ' + data.details);
+            setLog('解码/网络错误: ' + data.details + ' (' + data.type + ')');
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              hls.startLoad();
+            }
           }
         });
+
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // 仅在极其老旧、不支持 MSE 的古董 iOS 设备上作为保底备选
+        video.src = c.url;
+        video.play().catch(e => {
+          actionBtn.style.display = 'block';
+        });
+      } else {
+        setLog('当前浏览器内核不支持 MSE/HLS 播放');
       }
     }
 
-    // 渲染列表
+    // 初始化频道
     const listEl = document.getElementById('list');
     channels.forEach((c, idx) => {
       const item = document.createElement('div');
@@ -135,7 +140,7 @@
       item.innerText = c.name;
       item.onclick = () => play(c, item);
       listEl.appendChild(item);
-      if (idx === 0) play(c, item);
+      if (idx === 0) play(c, item); // 默认先播放第一项测试流
     });
   </script>
 </body>
