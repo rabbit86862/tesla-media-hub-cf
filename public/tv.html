@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <meta name="theme-color" content="#0f1115">
-  <title>车载电视直播</title>
+  <title>车载电视直播导航</title>
   <style>
     * {
       box-sizing: border-box;
@@ -20,13 +20,14 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       padding: 24px;
       user-select: none;
+      overflow-y: auto;
     }
     
     header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding-bottom: 20px;
+      padding-bottom: 16px;
       border-bottom: 1px solid #222630;
       margin-bottom: 24px;
     }
@@ -43,16 +44,31 @@
       border-radius: 8px;
     }
 
+    .section-title {
+      font-size: 15px;
+      color: #8b949e;
+      margin: 20px 0 12px 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-title::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: #222630;
+    }
+
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 18px;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
     }
     .card {
       background: #181b22;
       border: 1px solid #262a36;
       border-radius: 12px;
-      padding: 24px 18px;
+      padding: 20px 16px;
       display: flex;
       flex-direction: column;
       justify-content: center;
@@ -66,19 +82,23 @@
       border-color: #3e88f7;
     }
     .card-title {
-      font-size: 19px;
+      font-size: 17px;
       font-weight: 600;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
+      text-align: center;
     }
     .card-tag {
-      font-size: 13px;
-      color: #3e88f7;
-      background: rgba(62, 136, 247, 0.12);
-      padding: 3px 12px;
+      font-size: 12px;
+      padding: 2px 10px;
       border-radius: 20px;
     }
+    .tag-cctv { color: #f59e0b; background: rgba(245, 158, 11, 0.12); }
+    .tag-hk { color: #3e88f7; background: rgba(62, 136, 247, 0.12); }
+    .tag-tw { color: #10b981; background: rgba(16, 185, 129, 0.12); }
+    .tag-yt { color: #ff334b; background: rgba(255, 51, 75, 0.12); }
+
     .tip {
-      margin-top: 24px;
+      margin-top: 36px;
       text-align: center;
       font-size: 13px;
       color: #666;
@@ -91,47 +111,84 @@
     <a href="/" class="back-btn">‹ 返回影视中心</a>
   </header>
 
-  <div class="grid" id="grid"></div>
-  <div class="tip">提示：进入播放后，轻触画面右下角可切换为车机全屏</div>
+  <div id="container"></div>
+  <div class="tip">提示：点击进入频道后，按车机屏幕右下角全屏图标可沉浸观看，按左上角“‹”即可返回</div>
 
   <script>
-    // 采用官方移动端极简播放视口
-    const channels = [
-      { name: "CCTV-13 新闻", tag: "24h即时新闻", url: "https://tv.cctv.com/live/cctv13/" },
-      { name: "CCTV-1 综合", tag: "央视综合", url: "https://tv.cctv.com/live/cctv1/" },
-      { name: "CCTV-4 中文国际", tag: "全球播报", url: "https://tv.cctv.com/live/cctv4/" },
-      { name: "CCTV-2 财经", tag: "商业财经", url: "https://tv.cctv.com/live/cctv2/" },
-      { name: "CCTV-5 体育", tag: "赛事现场", url: "https://tv.cctv.com/live/cctv5/" },
-      { name: "CCTV-6 电影", tag: "正版电影", url: "https://tv.cctv.com/live/cctv6/" },
-      { name: "看看新闻 现场", tag: "东方卫视资讯", url: "https://live.kankanews.com/zhibo/" },
-      { name: "荔枝新闻 广东", tag: "大湾区资讯", url: "https://www.gdtv.cn/tvChannelDetail/44" }
+    const channelGroups = [
+      {
+        groupName: "央视频道 (国内直连)",
+        items: [
+          { name: "CCTV-13 新闻", tag: "24h即时", class: "tag-cctv", url: "https://tv.cctv.com/live/cctv13/" },
+          { name: "CCTV-1 综合", tag: "央视综合", class: "tag-cctv", url: "https://tv.cctv.com/live/cctv1/" },
+          { name: "CCTV-4 中文国际", tag: "全球播报", class: "tag-cctv", url: "https://tv.cctv.com/live/cctv4/" },
+          { name: "CCTV-5 体育", tag: "赛事现场", class: "tag-cctv", url: "https://tv.cctv.com/live/cctv5/" }
+        ]
+      },
+      {
+        groupName: "YouTube 官方直播专线 (需代理分流)",
+        items: [
+          { name: "YouTube TV 模式", tag: "车载大屏专版", class: "tag-yt", url: "https://www.youtube.com/tv" },
+          { name: "YouTube 官方首页", tag: "网页主站", class: "tag-yt", url: "https://m.youtube.com" },
+          { name: "中天新闻 YT 直播", tag: "24h即时现场", class: "tag-yt", url: "https://www.youtube.com/c/ctitv/live" },
+          { name: "TVBS 新闻 YT 直播", tag: "全球要闻", class: "tag-yt", url: "https://www.youtube.com/c/TVBSNEWS01/live" }
+        ]
+      },
+      {
+        groupName: "香港频道 (需代理分流)",
+        items: [
+          { name: "凤凰卫视资讯台", tag: "全球华语", class: "tag-hk", url: "https://m.fengshows.com/live" },
+          { name: "TVB 无线新闻", tag: "粤语资讯", class: "tag-hk", url: "https://news.tvb.com/tc/live/inews" },
+          { name: "香港电台 RTHK", tag: "公营电视", class: "tag-hk", url: "https://www.rthk.hk/tv" },
+          { name: "Now 新闻台", tag: "即时时政", class: "tag-hk", url: "https://news.now.com/home/live" }
+        ]
+      },
+      {
+        groupName: "台湾频道 (需代理分流)",
+        items: [
+          { name: "TVBS 新闻官网", tag: "24h直播", class: "tag-tw", url: "https://news.tvbs.com/live/news" },
+          { name: "东森新闻 EBC", tag: "即时头条", class: "tag-tw", url: "https://news.ebc.net.tw/live" },
+          { name: "三立新闻 SETN", tag: "政经热点", class: "tag-tw", url: "https://www.setn.com/live/" },
+          { name: "台视新闻 TTV", tag: "台湾要闻", class: "tag-tw", url: "https://news.ttv.com.tw/live" }
+        ]
+      }
     ];
 
     function openFullScreen(url) {
-      // 借助用户点击手势，先触发浏览器层级的全屏
       const elem = document.documentElement;
       if (elem.requestFullscreen) {
         elem.requestFullscreen().catch(() => {});
       } else if (elem.webkitRequestFullscreen) {
         elem.webkitRequestFullscreen();
       }
-
-      // 稍作微小延迟确保全屏动作被捕获，随后完成顶层跳转
       setTimeout(() => {
         window.location.href = url;
       }, 50);
     }
 
-    const gridEl = document.getElementById('grid');
-    channels.forEach(c => {
-      const card = document.createElement('div');
-      card.className = 'card';
-      card.innerHTML = `
-        <div class="card-title">${c.name}</div>
-        <div class="card-tag">${c.tag}</div>
-      `;
-      card.onclick = () => openFullScreen(c.url);
-      gridEl.appendChild(card);
+    const container = document.getElementById('container');
+
+    channelGroups.forEach(group => {
+      const title = document.createElement('div');
+      title.className = 'section-title';
+      title.innerText = group.groupName;
+      container.appendChild(title);
+
+      const grid = document.createElement('div');
+      grid.className = 'grid';
+
+      group.items.forEach(c => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <div class="card-title">${c.name}</div>
+          <div class="card-tag ${c.class}">${c.tag}</div>
+        `;
+        card.onclick = () => openFullScreen(c.url);
+        grid.appendChild(card);
+      });
+
+      container.appendChild(grid);
     });
   </script>
 </body>
