@@ -72,6 +72,23 @@
       border-left: 3px solid #3e88f7;
     }
 
+    /* 侧边栏底部外链提示 */
+    .sidebar-footer {
+      padding: 12px 16px;
+      border-top: 1px solid #232730;
+      font-size: 12px;
+      background: #13151a;
+    }
+    .sidebar-footer a {
+      color: #8b949e;
+      text-decoration: none;
+      display: block;
+      margin-top: 4px;
+    }
+    .sidebar-footer a:hover {
+      color: #58a6ff;
+    }
+
     /* 右侧主画面 */
     #main {
       flex: 1;
@@ -89,7 +106,7 @@
       background: #000;
     }
     
-    /* 手势交互播放按钮 */
+    /* 浏览器音频策略激活按钮 */
     #action-btn {
       position: absolute;
       padding: 14px 28px;
@@ -129,6 +146,10 @@
       <a href="/">‹ 返回点播</a>
     </div>
     <div class="channel-list" id="list"></div>
+    <div class="sidebar-footer">
+      <div style="color:#666;">国内央视专属通道：</div>
+      <a href="https://tv.cctv.com/live/cctv13/" target="_blank">↗ 打开 CCTV-13 官方网页</a>
+    </div>
   </div>
 
   <div id="main">
@@ -138,32 +159,27 @@
   </div>
 
   <script>
-    // 频道列表：直接填写各台原始直链即可，脚本会自动挂载反代
+    // 频道列表：官方 CDN 托管、原生开放 CORS (Access-Control-Allow-Origin: *) 直连流
     const channels = [
       { 
-        name: "浙江卫视 (官方CDN)", 
-        url: "https://hw-m-l.cztv.com/channels/lantian/channel01/1080p.m3u8",
-        needProxy: true
-      },
-      { 
-        name: "东方卫视 (官方CDN)", 
-        url: "https://live.kankanews.com/huikan/dfws.m3u8",
-        needProxy: true
-      },
-      { 
-        name: "广东卫视 (荔枝网官方)", 
-        url: "https://gdtv-live.oss-cn-guangzhou.aliyuncs.com/gdtv/live/gdtv.m3u8",
-        needProxy: true
-      },
-      { 
-        name: "Bloomberg 财经 (国际专线)", 
-        url: "https://liveproducedeuwest.global.ssl.fastly.net/btv/desktop/us_live.m3u8",
-        needProxy: true
-      },
-      { 
         name: "基准测试 (Mux Test)", 
-        url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-        needProxy: false
+        url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" 
+      },
+      { 
+        name: "CGTN 环球新闻 (官方海外CDN)", 
+        url: "https://news.cgtn.com/resource/live/english/cgtn-news.m3u8" 
+      },
+      { 
+        name: "Bloomberg 环球财经 (Fastly CDN)", 
+        url: "https://liveproducedeuwest.global.ssl.fastly.net/btv/desktop/us_live.m3u8" 
+      },
+      { 
+        name: "France 24 国际新闻 (Akamai CDN)", 
+        url: "https://static.france24.com/live/F24_EN_LO_HLS/live_tv.m3u8" 
+      },
+      { 
+        name: "ABC News 现场 (Disney Uplynk)", 
+        url: "https://content.uplynk.com/channel/3324f2467c414329b3b0cc5d98d50723.m3u8" 
       }
     ];
 
@@ -193,10 +209,8 @@
       if (el) el.classList.add('active');
       actionBtn.style.display = 'none';
 
-      // 核心跨域改造：需要反代的流自动拼接本项目的 /api/stream 接口
-      const streamUrl = c.needProxy 
-        ? ('/api/stream?url=' + encodeURIComponent(c.url)) 
-        : c.url;
+      // 彻底放弃 /api/stream 反代，纯直连拉取
+      const streamUrl = c.url;
 
       setLog('正在连接: ' + c.name);
 
@@ -219,7 +233,7 @@
           video.play().then(() => {
             setLog('起播成功 (静音模式)');
           }).catch(err => {
-            setLog('已准备就绪，请点击屏幕中央按钮播放');
+            setLog('已就绪，请点击中央按钮开启声音');
             actionBtn.style.display = 'block';
           });
         });
@@ -238,7 +252,7 @@
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = streamUrl;
         video.play().then(() => {
-          setLog('系统原生播放中');
+          setLog('原生播放中');
         }).catch(() => {
           actionBtn.style.display = 'block';
         });
