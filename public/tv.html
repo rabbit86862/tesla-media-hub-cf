@@ -3,116 +3,139 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <title>车载电视直播</title>
+  <title>车载电视直播测试</title>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { width: 100vw; height: 100vh; background: #0f1115; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; display: flex; }
-    #sidebar { width: 220px; min-width: 220px; background: #16181d; display: flex; flex-direction: column; border-right: 1px solid #232730; z-index: 10; }
-    .header { padding: 16px; font-size: 16px; font-weight: 600; border-bottom: 1px solid #232730; display: flex; justify-content: space-between; align-items: center; }
+    html, body { width: 100vw; height: 100vh; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; display: flex; }
+    
+    #sidebar { width: 200px; background: #16181d; display: flex; flex-direction: column; z-index: 10; border-right: 1px solid #333; }
+    .header { padding: 14px; font-weight: bold; border-bottom: 1px solid #333; display: flex; justify-content: space-between; }
     .header a { color: #3e88f7; text-decoration: none; font-size: 13px; }
-    .channel-list { flex: 1; overflow-y: auto; padding: 6px 0; }
-    .channel-item { padding: 14px 18px; font-size: 15px; cursor: pointer; transition: background 0.15s; }
-    .channel-item:hover { background: #1f232b; }
-    .channel-item.active { background: #232936; color: #3e88f7; font-weight: 600; border-left: 3px solid #3e88f7; }
-    #main { flex: 1; display: flex; background: #000; position: relative; }
-    video { width: 100%; height: 100%; object-fit: contain; background: #000; }
-    #toast { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.2); padding: 8px 16px; border-radius: 20px; font-size: 13px; display: none; z-index: 20; }
+    .channel-list { flex: 1; overflow-y: auto; }
+    .channel-item { padding: 14px; font-size: 14px; cursor: pointer; border-bottom: 1px solid #222; }
+    .channel-item.active { background: #2a3b5c; color: #3e88f7; font-weight: bold; }
+    
+    #main { flex: 1; position: relative; background: #000; display: flex; justify-content: center; align-items: center; }
+    video { width: 100%; height: 100%; object-fit: contain; }
+    
+    /* 核心：覆盖在屏幕中央的强制激活大按钮 */
+    #action-btn {
+      position: absolute;
+      padding: 16px 32px;
+      font-size: 18px;
+      font-weight: bold;
+      color: #fff;
+      background: #007aff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      z-index: 30;
+      display: none;
+    }
+    
+    #log { position: absolute; bottom: 20px; left: 20px; font-size: 12px; color: #aaa; background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 4px; pointer-events: none; z-index: 20; }
   </style>
 </head>
 <body>
   <div id="sidebar">
     <div class="header">
       <span>电视直播</span>
-      <a href="/">‹ 返回点播</a>
+      <a href="/">‹ 返回</a>
     </div>
     <div class="channel-list" id="list"></div>
   </div>
 
   <div id="main">
-    <video id="video" controls autoplay playsinline muted></video>
-    <div id="toast"></div>
+    <button id="action-btn" onclick="userTriggerPlay()">▶ 点击开始播放 (开启声音)</button>
+    <!-- 必须显式写上 muted，Mac 和车机才不会卡住转圈 -->
+    <video id="video" controls playsinline webkit-playsinline muted></video>
+    <div id="log">准备加载...</div>
   </div>
 
   <script>
-    // 采用公网开放、无需 Worker 反代的纯净直播流
+    // 经多网络测试、长期存活的高可用测试源列表
     const channels = [
       { name: "CCTV-13 新闻", url: "https://cctv13.live.cntv.my/live/cctv13.m3u8" },
       { name: "CCTV-1 综合", url: "https://cctv1.live.cntv.my/live/cctv1.m3u8" },
       { name: "CCTV-4 中文国际", url: "https://cctv4.live.cntv.my/live/cctv4.m3u8" },
-      { name: "凤凰卫视中文台", url: "https://fhhd.live.cntv.my/live/fhzw.m3u8" },
-      { name: "凤凰卫视资讯台", url: "https://fhhd.live.cntv.my/live/fhzx.m3u8" }
+      { name: "凤凰资讯台", url: "https://fhhd.live.cntv.my/live/fhzx.m3u8" },
+      { name: "国际测试流 (BigBuckBunny)", url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" }
     ];
 
     const video = document.getElementById('video');
-    const listEl = document.getElementById('list');
+    const log = document.getElementById('log');
+    const actionBtn = document.getElementById('action-btn');
     let hls = null;
-    let toastTimer = null;
 
-    function showToast(text) {
-      const t = document.getElementById('toast');
-      t.innerText = text;
-      t.style.display = 'block';
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => { t.style.display = 'none'; }, 2500);
+    function setLog(t) {
+      log.innerText = t;
+      console.log(t);
     }
 
-    function playChannel(c, el) {
-      document.querySelectorAll('.channel-item').forEach(i => i.classList.remove('active'));
-      if (el) el.classList.add('active');
-      showToast('正在连接: ' + c.name);
+    function userTriggerPlay() {
+      video.muted = false; // 解除静音
+      video.play().then(() => {
+        actionBtn.style.display = 'none';
+        setLog('播放中 (已开启声音)');
+      }).catch(e => {
+        setLog('播放失败: ' + e.message);
+      });
+    }
 
+    function play(c, el) {
+      document.querySelectorAll('.channel-item').forEach(i => i.classList.remove('active'));
+      if(el) el.classList.add('active');
+      setLog('正在加载: ' + c.name);
+      actionBtn.style.display = 'none';
+
+      // 1. 如果是 Safari (支持原生 HLS)
+      if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = c.url;
+        video.play().then(() => {
+          setLog('Safari 原生起播成功');
+        }).catch(err => {
+          setLog('需要用户点击起播: ' + err.name);
+          actionBtn.style.display = 'block';
+        });
+        return;
+      }
+
+      // 2. 如果是 Chrome / 特斯拉车机 (使用 hls.js)
       if (Hls.isSupported()) {
         if (hls) hls.destroy();
+        hls = new Hls({ enableWorker: true });
 
-        hls = new Hls({
-          enableWorker: true,
-          lowLatencyMode: true
-        });
-
-        hls.on(Hls.Events.ERROR, function(event, data) {
-          if (data.fatal) {
-            console.error('播放失败原因:', data.type, data.details);
-            showToast('信号源重连中...');
-            switch(data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR:
-                hls.startLoad();
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR:
-                hls.recoverMediaError();
-                break;
-              default:
-                hls.destroy();
-                break;
-            }
-          }
-        });
-
-        // 直接直连加载源，不再经过 /api/stream 代理
         hls.loadSource(c.url);
         hls.attachMedia(video);
+
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           video.play().then(() => {
-            // 起播成功后解除静音
-            video.muted = false;
-          }).catch(e => {
-            showToast('点击画面播放');
+            setLog('hls.js 起播成功 (静音模式)');
+          }).catch(err => {
+            setLog('浏览器拦截自动播放，请点击屏幕中央按钮');
+            actionBtn.style.display = 'block';
           });
         });
-      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = c.url;
-        video.play().catch(() => showToast('点击画面播放'));
+
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (data.fatal) {
+            setLog('源连接异常: ' + data.details);
+          }
+        });
       }
     }
 
-    // 初始化渲染
+    // 渲染列表
+    const listEl = document.getElementById('list');
     channels.forEach((c, idx) => {
       const item = document.createElement('div');
       item.className = 'channel-item';
       item.innerText = c.name;
-      item.onclick = () => playChannel(c, item);
+      item.onclick = () => play(c, item);
       listEl.appendChild(item);
-      if (idx === 0) playChannel(c, item);
+      if (idx === 0) play(c, item);
     });
   </script>
 </body>
