@@ -47,7 +47,7 @@
     .section-title {
       font-size: 15px;
       color: #8b949e;
-      margin: 20px 0 12px 0;
+      margin: 24px 0 12px 0;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -61,7 +61,7 @@
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
       gap: 16px;
     }
     .card {
@@ -93,9 +93,10 @@
       border-radius: 20px;
     }
     .tag-cctv { color: #f59e0b; background: rgba(245, 158, 11, 0.12); }
-    .tag-hk { color: #3e88f7; background: rgba(62, 136, 247, 0.12); }
-    .tag-tw { color: #10b981; background: rgba(16, 185, 129, 0.12); }
-    .tag-yt { color: #ff334b; background: rgba(255, 51, 75, 0.12); }
+    .tag-gdtv { color: #06b6d4; background: rgba(6, 182, 212, 0.12); }
+    .tag-tw   { color: #10b981; background: rgba(16, 185, 129, 0.12); }
+    .tag-hk   { color: #3e88f7; background: rgba(62, 136, 247, 0.12); }
+    .tag-yt   { color: #ff334b; background: rgba(255, 51, 75, 0.12); }
 
     .tip {
       margin-top: 36px;
@@ -112,7 +113,7 @@
   </header>
 
   <div id="container"></div>
-  <div class="tip">提示：点击进入频道后，按车机屏幕右下角全屏图标可沉浸观看，按左上角“‹”即可返回</div>
+  <div class="tip">提示：点击进入频道后，按右下角全屏图标可沉浸观看；若需切台，按车机左上角“‹”返回</div>
 
   <script>
     const channelGroups = [
@@ -121,35 +122,51 @@
         items: [
           { name: "CCTV-13 新闻", tag: "24h即时", class: "tag-cctv", url: "https://tv.cctv.com/live/cctv13/" },
           { name: "CCTV-1 综合", tag: "央视综合", class: "tag-cctv", url: "https://tv.cctv.com/live/cctv1/" },
+          { name: "CCTV-6 电影", tag: "高清正版电影", class: "tag-cctv", url: "https://tv.cctv.com/live/cctv6/" },
           { name: "CCTV-4 中文国际", tag: "全球播报", class: "tag-cctv", url: "https://tv.cctv.com/live/cctv4/" },
-          { name: "CCTV-5 体育", tag: "赛事现场", class: "tag-cctv", url: "https://tv.cctv.com/live/cctv5/" }
+          { name: "CCTV-5 体育", tag: "赛事现场", class: "tag-cctv", url: "https://tv.cctv.com/live/cctv5/" },
+          { name: "CCTV-2 财经", tag: "经济金融", class: "tag-cctv", url: "https://tv.cctv.com/live/cctv2/" }
         ]
       },
       {
-        groupName: "YouTube 官方直播专线 (需代理分流)",
+        groupName: "广东与大湾区频道 (国内直连)",
         items: [
-          { name: "YouTube TV 模式", tag: "车载大屏专版", class: "tag-yt", url: "https://www.youtube.com/tv" },
-          { name: "YouTube 官方首页", tag: "网页主站", class: "tag-yt", url: "https://m.youtube.com" },
-          { name: "中天新闻 YT 直播", tag: "24h即时现场", class: "tag-yt", url: "https://www.youtube.com/c/ctitv/live" },
-          { name: "TVBS 新闻 YT 直播", tag: "全球要闻", class: "tag-yt", url: "https://www.youtube.com/c/TVBSNEWS01/live" }
+          { name: "大湾区卫视", tag: "粤港澳湾区资讯", class: "tag-gdtv", url: "https://www.gdtv.cn/tvChannelDetail/44" },
+          { name: "广东卫视", tag: "广东官方主频道", class: "tag-gdtv", url: "https://www.gdtv.cn/tvChannelDetail/43" },
+          { name: "广东珠江频道", tag: "经典粤语影视", class: "tag-gdtv", url: "https://www.gdtv.cn/tvChannelDetail/45" },
+          { name: "广东新闻频道", tag: "全天新闻滚动", class: "tag-gdtv", url: "https://www.gdtv.cn/tvChannelDetail/46" }
         ]
       },
       {
-        groupName: "香港频道 (需代理分流)",
+        groupName: "台湾频道 (官网直达·需代理分流)",
         items: [
-          { name: "凤凰卫视资讯台", tag: "全球华语", class: "tag-hk", url: "https://m.fengshows.com/live" },
-          { name: "TVB 无线新闻", tag: "粤语资讯", class: "tag-hk", url: "https://news.tvb.com/tc/live/inews" },
-          { name: "香港电台 RTHK", tag: "公营电视", class: "tag-hk", url: "https://www.rthk.hk/tv" },
-          { name: "Now 新闻台", tag: "即时时政", class: "tag-hk", url: "https://news.now.com/home/live" }
+          { name: "TVBS 新闻官网", tag: "24h头条资讯", class: "tag-tw", url: "https://news.tvbs.com.tw/live/news" },
+          { name: "东森新闻 EBC", tag: "全天即时播报", class: "tag-tw", url: "https://news.ebc.net.tw/live" },
+          { name: "三立新闻 SETN", tag: "政经热点现场", class: "tag-tw", url: "https://www.setn.com/live/" },
+          { name: "台视新闻 TTV", tag: "公营无线频道", class: "tag-tw", url: "https://news.ttv.com.tw/live" },
+          { name: "华视新闻 CTS", tag: "深度公共新闻", class: "tag-tw", url: "https://news.cts.com.tw/live/" }
         ]
       },
       {
-        groupName: "台湾频道 (需代理分流)",
+        groupName: "香港频道 (官网直达·需代理分流)",
         items: [
-          { name: "TVBS 新闻官网", tag: "24h直播", class: "tag-tw", url: "https://news.tvbs.com/live/news" },
-          { name: "东森新闻 EBC", tag: "即时头条", class: "tag-tw", url: "https://news.ebc.net.tw/live" },
-          { name: "三立新闻 SETN", tag: "政经热点", class: "tag-tw", url: "https://www.setn.com/live/" },
-          { name: "台视新闻 TTV", tag: "台湾要闻", class: "tag-tw", url: "https://news.ttv.com.tw/live" }
+          { name: "凤凰卫视资讯台", tag: "全球华语焦点", class: "tag-hk", url: "https://m.fengshows.com/live" },
+          { name: "TVB 无线新闻", tag: "粤语资讯直出", class: "tag-hk", url: "https://news.tvb.com/tc/live/inews" },
+          { name: "香港电台 RTHK", tag: "公营电视视口", class: "tag-hk", url: "https://www.rthk.hk/tv" },
+          { name: "Now 新闻台", tag: "即时时政财经", class: "tag-hk", url: "https://news.now.com/home/live" }
+        ]
+      },
+      {
+        groupName: "港台精选 YouTube 官方直播专线 (需代理分流·即点即播)",
+        items: [
+          { name: "TVBS 新闻 YT", tag: "台湾要闻", class: "tag-yt", url: "https://www.youtube.com/@TVBSNEWS01/live" },
+          { name: "东森新闻 YT", tag: "综合头条", class: "tag-yt", url: "https://www.youtube.com/@newsebc/live" },
+          { name: "中天新闻 YT", tag: "全天现场", class: "tag-yt", url: "https://www.youtube.com/@ctitv/live" },
+          { name: "三立新闻 YT", tag: "热点追踪", class: "tag-yt", url: "https://www.youtube.com/@setn/live" },
+          { name: "台视新闻 YT", tag: "无线直播", class: "tag-yt", url: "https://www.youtube.com/@ttvnewsview/live" },
+          { name: "华视新闻 YT", tag: "新闻直达", class: "tag-yt", url: "https://www.youtube.com/@CtsTwNews/live" },
+          { name: "寰宇新闻 YT", tag: "国际视野", class: "tag-yt", url: "https://www.youtube.com/@GlobalNews_tw/live" },
+          { name: "TVB 无线 YT", tag: "香港无线", class: "tag-yt", url: "https://www.youtube.com/@tvbnewsofficial/live" }
         ]
       }
     ];
