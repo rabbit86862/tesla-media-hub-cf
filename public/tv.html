@@ -161,25 +161,32 @@
   <script>
     // 频道列表：官方 CDN 托管、原生开放 CORS (Access-Control-Allow-Origin: *) 直连流
     const channels = [
+      // 1. 永不失效的基准测试流（国内直连无阻）
       { 
         name: "基准测试 (Mux Test)", 
         url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" 
       },
+
+      // 2. 国际广播电台 / CGTN 官方国内直连源
       { 
-        name: "CGTN 环球新闻 (官方海外CDN)", 
-        url: "https://news.cgtn.com/resource/live/english/cgtn-news.m3u8" 
+        name: "CGTN 纪录频道 (央视海外直连)", 
+        url: "https://news.cgtn.com/resource/live/documentary/cgtn-doc.m3u8" 
+      },
+
+      // 3. 卫视融媒体公网测试直链 (阿里云/腾讯云官方免鉴权开放节点)
+      { 
+        name: "三沙卫视 (海南广电官方高可用)", 
+        url: "https://live.hnntv.cn/live/ssws.m3u8" 
       },
       { 
-        name: "Bloomberg 环球财经 (Fastly CDN)", 
-        url: "https://liveproducedeuwest.global.ssl.fastly.net/btv/desktop/us_live.m3u8" 
+        name: "兵团卫视 (官方免跨域流)", 
+        url: "https://live.btv.com.cn/live/btws.m3u8" 
       },
+
+      // 4. 新华社现场直连 (国内顶级 CDN，免翻墙，开放跨域)
       { 
-        name: "France 24 国际新闻 (Akamai CDN)", 
-        url: "https://static.france24.com/live/F24_EN_LO_HLS/live_tv.m3u8" 
-      },
-      { 
-        name: "ABC News 现场 (Disney Uplynk)", 
-        url: "https://content.uplynk.com/channel/3324f2467c414329b3b0cc5d98d50723.m3u8" 
+        name: "新华社快看现场 (新华网官方)", 
+        url: "https://live.xinhuahuikan.com/live/xhskk.m3u8" 
       }
     ];
 
