@@ -3,108 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <meta name="theme-color" content="#0f1115">
   <title>车载电视直播</title>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
   <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      -webkit-tap-highlight-color: transparent;
-    }
-    html, body {
-      width: 100vw;
-      height: 100vh;
-      background: #0f1115;
-      color: #fff;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      overflow: hidden;
-      display: flex;
-    }
-    
-    /* 左侧控制栏 */
-    #sidebar {
-      width: 220px;
-      min-width: 220px;
-      background: #16181d;
-      display: flex;
-      flex-direction: column;
-      border-right: 1px solid #232730;
-      z-index: 10;
-    }
-    .header {
-      padding: 16px;
-      font-size: 16px;
-      font-weight: 600;
-      border-bottom: 1px solid #232730;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .header a {
-      color: #3e88f7;
-      text-decoration: none;
-      font-size: 13px;
-      display: flex;
-      align-items: center;
-      gap: 2px;
-    }
-    .channel-list {
-      flex: 1;
-      overflow-y: auto;
-      padding: 6px 0;
-    }
-    .channel-item {
-      padding: 14px 18px;
-      font-size: 15px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      transition: background 0.15s ease, color 0.15s ease;
-      user-select: none;
-    }
-    .channel-item:hover {
-      background: #1f232b;
-    }
-    .channel-item.active {
-      background: #232936;
-      color: #3e88f7;
-      font-weight: 600;
-      border-left: 3px solid #3e88f7;
-    }
-
-    /* 右侧视口与播放区域 */
-    #main {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      background: #000;
-      position: relative;
-      overflow: hidden;
-    }
-    video {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      background: #000;
-    }
-    
-    /* 状态提示浮层 */
-    #toast {
-      position: absolute;
-      top: 24px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.75);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      padding: 8px 18px;
-      border-radius: 20px;
-      font-size: 13px;
-      pointer-events: none;
-      display: none;
-      z-index: 20;
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100vw; height: 100vh; background: #0f1115; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; display: flex; }
+    #sidebar { width: 220px; min-width: 220px; background: #16181d; display: flex; flex-direction: column; border-right: 1px solid #232730; z-index: 10; }
+    .header { padding: 16px; font-size: 16px; font-weight: 600; border-bottom: 1px solid #232730; display: flex; justify-content: space-between; align-items: center; }
+    .header a { color: #3e88f7; text-decoration: none; font-size: 13px; }
+    .channel-list { flex: 1; overflow-y: auto; padding: 6px 0; }
+    .channel-item { padding: 14px 18px; font-size: 15px; cursor: pointer; transition: background 0.15s; }
+    .channel-item:hover { background: #1f232b; }
+    .channel-item.active { background: #232936; color: #3e88f7; font-weight: 600; border-left: 3px solid #3e88f7; }
+    #main { flex: 1; display: flex; background: #000; position: relative; }
+    video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    #toast { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.2); padding: 8px 16px; border-radius: 20px; font-size: 13px; display: none; z-index: 20; }
   </style>
 </head>
 <body>
@@ -117,22 +30,18 @@
   </div>
 
   <div id="main">
-    <video id="video" controls autoplay playsinline></video>
+    <video id="video" controls autoplay playsinline muted></video>
     <div id="toast"></div>
   </div>
 
   <script>
-    // 频道列表配置：采用高校与教育网常开 CORS 的稳定源
+    // 采用公网开放、无需 Worker 反代的纯净直播流
     const channels = [
-      { name: "CCTV-13 新闻", url: "https://ivi.bupt.edu.cn/hls/cctv13hd.m3u8" },
-      { name: "CCTV-1 综合", url: "https://ivi.bupt.edu.cn/hls/cctv1hd.m3u8" },
-      { name: "CCTV-4 中文国际", url: "https://ivi.bupt.edu.cn/hls/cctv4hd.m3u8" },
-      { name: "CCTV-2 财经", url: "https://ivi.bupt.edu.cn/hls/cctv2hd.m3u8" },
-      { name: "CCTV-5 体育", url: "https://ivi.bupt.edu.cn/hls/cctv5hd.m3u8" },
-      { name: "浙江卫视", url: "https://ivi.bupt.edu.cn/hls/zntv.m3u8" },
-      { name: "湖南卫视", url: "https://ivi.bupt.edu.cn/hls/hntv.m3u8" },
-      { name: "东方卫视", url: "https://ivi.bupt.edu.cn/hls/dftv.m3u8" },
-      { name: "广东卫视", url: "https://ivi.bupt.edu.cn/hls/gdtv.m3u8" }
+      { name: "CCTV-13 新闻", url: "https://cctv13.live.cntv.my/live/cctv13.m3u8" },
+      { name: "CCTV-1 综合", url: "https://cctv1.live.cntv.my/live/cctv1.m3u8" },
+      { name: "CCTV-4 中文国际", url: "https://cctv4.live.cntv.my/live/cctv4.m3u8" },
+      { name: "凤凰卫视中文台", url: "https://fhhd.live.cntv.my/live/fhzw.m3u8" },
+      { name: "凤凰卫视资讯台", url: "https://fhhd.live.cntv.my/live/fhzx.m3u8" }
     ];
 
     const video = document.getElementById('video');
@@ -145,63 +54,65 @@
       t.innerText = text;
       t.style.display = 'block';
       clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => {
-        t.style.display = 'none';
-      }, 2500);
+      toastTimer = setTimeout(() => { t.style.display = 'none'; }, 2500);
     }
 
     function playChannel(c, el) {
       document.querySelectorAll('.channel-item').forEach(i => i.classList.remove('active'));
       if (el) el.classList.add('active');
-      showToast('正在加载: ' + c.name);
-
-      // 通过项目 Worker 后端的 /api/stream 中转，自动注入 CORS 头解决跨域转圈
-      const proxyUrl = '/api/stream?url=' + encodeURIComponent(c.url);
+      showToast('正在连接: ' + c.name);
 
       if (Hls.isSupported()) {
         if (hls) hls.destroy();
 
         hls = new Hls({
           enableWorker: true,
-          lowLatencyMode: true,
-          manifestLoadingTimeOut: 8000,
-          levelLoadingTimeOut: 8000
+          lowLatencyMode: true
         });
 
-        let triedFallback = false;
-
         hls.on(Hls.Events.ERROR, function(event, data) {
-          if (data.fatal && !triedFallback) {
-            triedFallback = true;
-            console.warn('代理加载异常，尝试直连源地址:', c.url);
-            showToast('正在切换直连通道...');
-            hls.loadSource(c.url);
+          if (data.fatal) {
+            console.error('播放失败原因:', data.type, data.details);
+            showToast('信号源重连中...');
+            switch(data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                hls.recoverMediaError();
+                break;
+              default:
+                hls.destroy();
+                break;
+            }
           }
         });
 
-        hls.loadSource(proxyUrl);
+        // 直接直连加载源，不再经过 /api/stream 代理
+        hls.loadSource(c.url);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          video.play().catch(e => {
-            console.log('浏览器阻止了自动播放，需手动点击画面起播:', e);
+          video.play().then(() => {
+            // 起播成功后解除静音
+            video.muted = false;
+          }).catch(e => {
+            showToast('点击画面播放');
           });
         });
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = proxyUrl;
-        video.addEventListener('loadedmetadata', () => {
-          video.play().catch(e => console.log('自动播放未触发:', e));
-        });
+        video.src = c.url;
+        video.play().catch(() => showToast('点击画面播放'));
       }
     }
 
-    // 渲染频道列表
+    // 初始化渲染
     channels.forEach((c, idx) => {
       const item = document.createElement('div');
       item.className = 'channel-item';
       item.innerText = c.name;
       item.onclick = () => playChannel(c, item);
       listEl.appendChild(item);
-      if (idx === 0) playChannel(c, item); // 默认打开 CCTV-13 新闻
+      if (idx === 0) playChannel(c, item);
     });
   </script>
 </body>
