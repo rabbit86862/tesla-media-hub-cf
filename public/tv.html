@@ -3,10 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#0f1115">
   <title>车载电视直播</title>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
   <style>
     * {
       box-sizing: border-box;
@@ -24,21 +22,21 @@
       display: flex;
     }
     
-    /* 左侧控制栏 */
+    /* 左侧电视频道侧边栏 */
     #sidebar {
-      width: 220px;
-      min-width: 220px;
-      background: #16181d;
+      width: 210px;
+      min-width: 210px;
+      background: #14161b;
       display: flex;
       flex-direction: column;
-      border-right: 1px solid #232730;
+      border-right: 1px solid #222630;
       z-index: 10;
     }
     .header {
       padding: 16px;
       font-size: 15px;
       font-weight: 600;
-      border-bottom: 1px solid #232730;
+      border-bottom: 1px solid #222630;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -59,11 +57,12 @@
       cursor: pointer;
       display: flex;
       align-items: center;
-      transition: background 0.15s;
+      transition: background 0.15s, color 0.15s;
       border-left: 3px solid transparent;
+      user-select: none;
     }
     .channel-item:hover {
-      background: #1f232b;
+      background: #1c1f26;
     }
     .channel-item.active {
       background: #232936;
@@ -72,70 +71,18 @@
       border-left: 3px solid #3e88f7;
     }
 
-    /* 侧边栏底部外链提示 */
-    .sidebar-footer {
-      padding: 12px 16px;
-      border-top: 1px solid #232730;
-      font-size: 12px;
-      background: #13151a;
-    }
-    .sidebar-footer a {
-      color: #8b949e;
-      text-decoration: none;
-      display: block;
-      margin-top: 4px;
-    }
-    .sidebar-footer a:hover {
-      color: #58a6ff;
-    }
-
-    /* 右侧主画面 */
+    /* 右侧主画面（iframe 安全视口） */
     #main {
       flex: 1;
       position: relative;
       background: #000;
-      display: flex;
-      justify-content: center;
-      align-items: center;
       overflow: hidden;
     }
-    video {
+    iframe {
       width: 100%;
       height: 100%;
-      object-fit: contain;
-      background: #000;
-    }
-    
-    /* 浏览器音频策略激活按钮 */
-    #action-btn {
-      position: absolute;
-      padding: 14px 28px;
-      font-size: 16px;
-      font-weight: bold;
-      color: #fff;
-      background: #007aff;
       border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.6);
-      z-index: 30;
-      display: none;
-    }
-
-    /* 状态与调试面板 */
-    #log {
-      position: absolute;
-      bottom: 20px;
-      left: 20px;
-      font-size: 12px;
-      color: #ccc;
-      background: rgba(0, 0, 0, 0.75);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      padding: 8px 14px;
-      border-radius: 4px;
-      pointer-events: none;
-      z-index: 20;
-      max-width: 80%;
+      background: #000;
     }
   </style>
 </head>
@@ -146,136 +93,42 @@
       <a href="/">‹ 返回点播</a>
     </div>
     <div class="channel-list" id="list"></div>
-    <div class="sidebar-footer">
-      <div style="color:#666;">国内央视专属通道：</div>
-      <a href="https://tv.cctv.com/live/cctv13/" target="_blank">↗ 打开 CCTV-13 官方网页</a>
-    </div>
   </div>
 
   <div id="main">
-    <button id="action-btn" onclick="userTriggerPlay()">▶ 点击播放 (开启声音)</button>
-    <video id="video" controls playsinline webkit-playsinline muted></video>
-    <div id="log">准备加载...</div>
+    <iframe id="live-frame" allow="autoplay; fullscreen" allowfullscreen></iframe>
   </div>
 
   <script>
-    // 频道列表：官方 CDN 托管、原生开放 CORS (Access-Control-Allow-Origin: *) 直连流
+    // 频道列表：全部采用官方已打通合法鉴权的轻量移动版直播视口
     const channels = [
-      // 1. 基准测试流（确认播放器内核正常）
-      { 
-        name: "基准测试 (Mux Test)", 
-        url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" 
-      },
-
-      // 2. 国际权威财经与新闻（官方开放 CDN，走猫猫代理秒开）
-      { 
-        name: "Bloomberg 环球财经", 
-        url: "https://liveproducedeuwest.global.ssl.fastly.net/btv/desktop/us_live.m3u8" 
-      },
-
-      // 3. 国际公共广播（Akamai 国际顶级 CDN，永不掐断连接）
-      { 
-        name: "France 24 国际中文/英文", 
-        url: "https://static.france24.com/live/F24_EN_LO_HLS/live_tv.m3u8" 
-      },
-
-      // 4. 经典电影与纪录片轮播（全天候无间断推流，开放 CORS）
-      { 
-        name: "红牛极致极限运动", 
-        url: "https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8" 
-      },
-
-      // 5. 探索与自然风景频道（用于车机巡航高画质背景）
-      { 
-        name: "NASA TV 太空漫步直播", 
-        url: "https://ntv1.akamaized.net/hls/live/2014075/NASA-NTV1-HLS/master.m3u8" 
-      }
+      { name: "CCTV-13 新闻", url: "https://tv.cctv.com/live/cctv13/" },
+      { name: "CCTV-1 综合", url: "https://tv.cctv.com/live/cctv1/" },
+      { name: "CCTV-4 中文国际", url: "https://tv.cctv.com/live/cctv4/" },
+      { name: "CCTV-2 财经", url: "https://tv.cctv.com/live/cctv2/" },
+      { name: "CCTV-5 体育", url: "https://tv.cctv.com/live/cctv5/" },
+      { name: "CCTV-6 电影", url: "https://tv.cctv.com/live/cctv6/" },
+      { name: "看看新闻 现场直播", url: "https://live.kankanews.com/zhibo/" },
+      { name: "荔枝网 广东新闻", url: "https://www.gdtv.cn/tvChannelDetail/44" }
     ];
 
-    const video = document.getElementById('video');
-    const log = document.getElementById('log');
-    const actionBtn = document.getElementById('action-btn');
+    const frame = document.getElementById('live-frame');
     const listEl = document.getElementById('list');
-    let hls = null;
 
-    function setLog(text) {
-      log.innerText = text;
-      console.log(text);
-    }
-
-    function userTriggerPlay() {
-      video.muted = false;
-      video.play().then(() => {
-        actionBtn.style.display = 'none';
-        setLog('播放中 (音画同步)');
-      }).catch(e => {
-        setLog('启动播放失败: ' + e.message);
-      });
-    }
-
-    function play(c, el) {
+    function switchChannel(c, el) {
       document.querySelectorAll('.channel-item').forEach(i => i.classList.remove('active'));
       if (el) el.classList.add('active');
-      actionBtn.style.display = 'none';
-
-      // 彻底放弃 /api/stream 反代，纯直连拉取
-      const streamUrl = c.url;
-
-      setLog('正在连接: ' + c.name);
-
-      if (Hls.isSupported()) {
-        if (hls) {
-          hls.destroy();
-        }
-
-        hls = new Hls({
-          enableWorker: true,
-          lowLatencyMode: false,
-          manifestLoadingTimeOut: 15000,
-          manifestLoadingMaxRetry: 3
-        });
-
-        hls.loadSource(streamUrl);
-        hls.attachMedia(video);
-
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          video.play().then(() => {
-            setLog('起播成功 (静音模式)');
-          }).catch(err => {
-            setLog('已就绪，请点击中央按钮开启声音');
-            actionBtn.style.display = 'block';
-          });
-        });
-
-        hls.on(Hls.Events.ERROR, (event, data) => {
-          if (data.fatal) {
-            setLog('流异常: ' + data.details + ' (' + data.type + ')');
-            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-              hls.startLoad();
-            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-              hls.recoverMediaError();
-            }
-          }
-        });
-
-      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = streamUrl;
-        video.play().then(() => {
-          setLog('原生播放中');
-        }).catch(() => {
-          actionBtn.style.display = 'block';
-        });
-      }
+      frame.src = c.url;
     }
 
-    // 渲染频道列表，默认加载第 1 项
+    // 渲染频道列表，默认打开 CCTV-13 新闻
     channels.forEach((c, idx) => {
       const item = document.createElement('div');
       item.className = 'channel-item';
       item.innerText = c.name;
-      item.onclick = () => play(c, item);
+      item.onclick = () => switchChannel(c, item);
       listEl.appendChild(item);
-      if (idx === 0) play(c, item);
+      if (idx === 0) switchChannel(c, item);
     });
   </script>
 </body>
