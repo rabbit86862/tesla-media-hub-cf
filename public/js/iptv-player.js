@@ -1,18 +1,5 @@
 /**
  * 播放适配器（tesla-media-hub 内置播放库，基于 wody11/Tesla-VideoPlayer）
- *
- * 播放库来自 tesla-media-hub 内置资源，置于 public/assets/ 与 public/wasm/：
- *   - guard-e6d89b7c.js 导出 Player（m），其余 avplayer 分片为其内部相对 import
- *   - wasm 解码器以绝对路径 /wasm/*.wasm 加载
- *
- * 同时承载两套播放场景：
- *   - IPTV 直播：opts.live = true（默认），对应 m3u8/mpegts live 流的缓冲与 seek 策略
- *   - AppleCMS 点播：opts.live = false，对应 HLS/MP4 VOD，启用 seek / 缓冲更宽
- *
- * 服务端不做改动（AppleCMS 点播仍走原站直连，不经服务端 ffmpeg；IPTV 走 /stream/...ts）。
- *
- * 任意一步失败（库缺失 / 浏览器不支持 WebCodecs / 流无响应）都会抛错或回调 onError，
- * 由调用方给出失败提示。
  */
 
 let _mod = null;
@@ -47,24 +34,22 @@ const DECODE_PRESET_HARDWARE = 'hardware';
 const DECODE_PRESET_SOFTWARE = 'software';
 const FIRST_FRAME_TIMEOUT_MS = 15000;
 
-/**
- * 创建并启动一个播放实例（同时承载 IPTV 直播与 AppleCMS 点播）
- * @param {HTMLElement} hostEl 播放器挂载容器
- * @param {string} url 播放地址（HLS / MP4 / MPEG-TS 等）
- * @param {object} opts { live, onFirstFrame, onError, onEnded, onStatus, onTime }
- *   - live：是否直播模式（默认 true）。点播场景（如 AppleCMS 电影）须传 false，
- *           以启用缓冲/seek 策略。
- *   - onTime：点播时间更新回调 (currentTime, duration)，用于「末集停在末帧」判定。
- * @returns {Promise<object>} 句柄 { destroy, pause, getCurrentTime, getDuration }
- */
 async function createPlayer(hostEl, url, opts = {}) {
   if (!isSupported()) throw new Error('当前浏览器不支持 WebCodecs（播放所需）');
+
+  // 1. 过滤任何非必要的代理包裹，确保默认以纯直连地址喂给内核
+  if (url && typeof url === 'string' && url.includes('/api/stream?url=')) {
+    const match = url.match(/[?&]url=([^&]+)/);
+    if (match && match[1]) {
+      url = decodeURIComponent(match[1]);
+    }
+  }
 
   const mod = await loadModule();
   const Player = mod.m || mod.default || mod.Player;
   if (typeof Player !== 'function') throw new Error('播放库未导出 Player');
 
-  const live = opts.live !== false; // 默认 live（IPTV）；AppleCMS 点播传 false
+  const live = opts.live !== false;
   const errorMsg = live ? '直播源无响应' : '片源无响应';
 
   let decodePresetId = DECODE_PRESET_HARDWARE;
@@ -101,7 +86,6 @@ async function createPlayer(hostEl, url, opts = {}) {
     if (destroyed) return;
     if (fallback) decodePresetId = DECODE_PRESET_SOFTWARE;
 
-    // 重建前先销毁旧实例（切换硬/软解或重试）
     if (player) {
       try {
         if (typeof player.destroy === 'function') player.destroy();
@@ -132,6 +116,14 @@ async function createPlayer(hostEl, url, opts = {}) {
       if (typeof opts.onEnded === 'function') opts.onEnded();
     });
 
+    // 显式捕获底层网络/解码异常
+    player.on('error', (err) => {
+      clearTimers();
+      if (typeof opts.onError === 'function') {
+        opts.onError(err || new Error('内核拉流异常'));
+      }
+    });
+
     function markFirstFrame() {
       if (firstFrameOk) return;
       firstFrameOk = true;
@@ -140,13 +132,19 @@ async function createPlayer(hostEl, url, opts = {}) {
     }
 
     try {
-      player.loadSource(url, { isLive: live }, true);
+      const playPromise = player.loadSource(url, { isLive: live }, true);
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch((e) => {
+          clearTimers();
+          if (typeof opts.onError === 'function') opts.onError(e);
+        });
+      }
     } catch (e) {
+      clearTimers();
       if (typeof opts.onError === 'function') opts.onError(e);
       return;
     }
 
-    // 首帧超时：硬解无响应则回退软解重建；软解仍无响应则报错
     fallbackTimer = setTimeout(() => {
       if (destroyed || firstFrameOk) return;
       if (decodePresetId === DECODE_PRESET_HARDWARE && !fallback) {
