@@ -133,8 +133,8 @@ async function applyMode() {
     return;
   }
 
-  // 默认走同源流媒体代理（绕过源站防盗链/跨域）；若已触发回退则直连原始源站
-  ctx.lastUrl = ctx._fallback ? ctx.rawUrl : proxyUrl(ctx.rawUrl);
+  // 默认直接直连源站（秒开零等待）；若直连失败（跨域受限）才回退走代理通道
+  ctx.lastUrl = ctx._fallback ? proxyUrl(ctx.rawUrl) : ctx.rawUrl;
 
   if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
   // 首帧超时提示：解码/渲染若静默失败（黑屏无报错），主动给出可能原因
@@ -151,11 +151,11 @@ async function applyMode() {
       },
       onError: (e) => {
         if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
-        // 代理失败（如源站封锁 CF 出口 IP）→ 自动回退浏览器直连（仅一次）
+        // 直连失败（如源站限制浏览器跨域）→ 自动回退走 Worker 代理中转通道（仅一次）
         if (!ctx._fallback && !ctx._fallbackTried) {
           ctx._fallbackTried = true;
           ctx._fallback = true;
-          showToast('代理失败，正在尝试浏览器直连源站…');
+          showToast('直连受限，正在尝试代理通道拉流…');
           applyMode();
           return;
         }
@@ -196,7 +196,7 @@ async function applyMode() {
     if (!ctx._fallback && !ctx._fallbackTried) {
       ctx._fallbackTried = true;
       ctx._fallback = true;
-      showToast('代理失败，正在尝试浏览器直连源站…');
+      showToast('直连受限，正在尝试代理通道拉流…');
       applyMode();
       return;
     }
