@@ -193,20 +193,27 @@
     });
   </script>
 
-  <!-- 电视直播频道弹窗（自动拉取 Guovin/iptv-api IPv4 订阅源） -->
+  <!-- 电视直播频道弹窗（自动过滤 HTTPS 直连源 + 同频道多线路自动容错） -->
   <div id="tv-modal" class="modal hidden" onclick="if(event.target===this)closeTvModal()">
     <div class="modal-body" style="max-width:760px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
-        <h3 style="margin:0;">📺 电视直播 (IPv4)</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+        <h3 style="margin:0;">📺 电视直播（HTTPS 直连）</h3>
         <div style="display:flex;gap:8px;align-items:center;">
-          <button class="quality-btn" onclick="loadTvChannels(true)">🔄 刷新源</button>
-          <button class="player-close" onclick="closeTvModal()">✕</button>
+          <!-- 切换不同订阅源 -->
+          <select id="tv-source-select" onchange="loadTvChannels(true)" style="min-height:38px;padding:4px 10px;font-size:14px;width:auto;">
+            <option value="https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/result.m3u">源1：Guovin 综合优选</option>
+            <option value="https://testingcf.jsdelivr.net/gh/fanmingming/live@main/tv/m3u/ipv6.m3u">源2：Fanmingming 高清源</option>
+            <option value="https://iptv-org.github.io/iptv/languages/zho.m3u">源3：港澳台及华语直播</option>
+            <option value="https://iptv-org.github.io/iptv/regions/twn.m3u">源4：台湾频道专线</option>
+          </select>
+          <button class="quality-btn" style="min-height:38px;" onclick="loadTvChannels(true)">🔄 刷新</button>
+          <button class="player-close" style="min-height:38px;" onclick="closeTvModal()">✕</button>
         </div>
       </div>
 
       <!-- 频道搜索框 -->
       <div class="search-row" style="margin-bottom:4px;">
-        <input id="tv-search-input" type="text" placeholder="搜索频道（如：CCTV、卫视、凤凰、中天…）" oninput="renderTvChannels()">
+        <input id="tv-search-input" type="text" placeholder="搜索频道（如：CCTV、卫视、凤凰、中天、TVBS…）" oninput="renderTvChannels()">
       </div>
 
       <!-- 分组标签栏 -->
@@ -214,16 +221,14 @@
 
       <!-- 状态提示与频道网格 -->
       <div id="tv-status" class="tip" style="text-align:center;padding:8px 0;"></div>
-      <div id="tv-channel-grid" class="ep-grid" style="grid-template-columns:repeat(auto-fill,minmax(135px,1fr));max-height:52vh;overflow-y:auto;padding-bottom:4px;"></div>
+      <div id="tv-channel-grid" class="ep-grid" style="grid-template-columns:repeat(auto-fill,minmax(135px,1fr));max-height:50vh;overflow-y:auto;padding-bottom:4px;"></div>
     </div>
   </div>
 
   <script>
-    // Guovin/iptv-api 纯 IPv4 每日自动测速更新订阅源（国内 jsDelivr CDN 加速）
-    const IPTV_M3U_URL = 'https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/ipv4/result.m3u';
-
-    let allTvChannels = [];
+    let allTvChannels = [];   // 合并后的频道列表: [{ name, group, urls: [...] }]
     let currentTvGroup = '全部';
+    let currentTvQueue = null; // 当前正在播放的频道多线路队列: { name, urls, index }
 
     function openTvModal() {
       document.getElementById('tv-modal').classList.remove('hidden');
@@ -242,28 +247,31 @@
     async function loadTvChannels(forceRefresh) {
       const statusEl = document.getElementById('tv-status');
       const gridEl = document.getElementById('tv-channel-grid');
+      const selectEl = document.getElementById('tv-source-select');
+      const m3uUrl = selectEl ? selectEl.value : 'https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/result.m3u';
+
       if (forceRefresh) {
         allTvChannels = [];
         gridEl.innerHTML = '';
       }
       statusEl.style.display = 'block';
-      statusEl.textContent = '正在同步最新 IPv4 直播源列表…';
+      statusEl.textContent = '正在同步并筛选可直连的 HTTPS 频道…';
 
       try {
         let res;
         try {
-          res = await fetch(IPTV_M3U_URL, { cache: forceRefresh ? 'no-cache' : 'default' });
+          res = await fetch(m3uUrl, { cache: forceRefresh ? 'no-cache' : 'default' });
           if (!res.ok) throw new Error('HTTP ' + res.status);
         } catch (directErr) {
-          res = await fetch('/api/stream?url=' + encodeURIComponent(IPTV_M3U_URL));
-          if (!res.ok) throw new Error('代理拉取失败 HTTP ' + res.status);
+          res = await fetch('/api/stream?url=' + encodeURIComponent(m3uUrl));
+          if (!res.ok) throw new Error('拉取失败 HTTP ' + res.status);
         }
 
         const m3uText = await res.text();
-        allTvChannels = parseM3uContent(m3uText);
+        allTvChannels = parseAndGroupM3u(m3uText);
 
         if (allTvChannels.length === 0) {
-          statusEl.textContent = '未解析到有效频道，请稍后点击“刷新源”重试';
+          statusEl.textContent = '当前订阅源暂无可用的 HTTPS 直连频道，请在右上角切换其他订阅源';
           return;
         }
 
@@ -275,9 +283,10 @@
       }
     }
 
-    function parseM3uContent(text) {
+    // 解析 M3U：仅保留 https:// 链接（彻底避开浏览器拦截与境外代理超时），并合并同名频道的多条备用线路
+    function parseAndGroupM3u(text) {
       const lines = text.split(/\r?\n/);
-      const list = [];
+      const channelMap = new Map();
       let currentMeta = null;
 
       for (let i = 0; i < lines.length; i++) {
@@ -288,24 +297,29 @@
           const groupMatch = line.match(/group-title="([^"]*)"/i);
           const commaIdx = line.lastIndexOf(',');
           const name = commaIdx !== -1 ? line.slice(commaIdx + 1).trim() : '未知频道';
-          const group = (groupMatch && groupMatch[1].trim()) ? groupMatch[1].trim() : '其他';
+          const group = (groupMatch && groupMatch[1].trim()) ? groupMatch[1].trim() : '精选频道';
           currentMeta = { name, group };
         } else if (!line.startsWith('#') && currentMeta) {
-          if (/^https?:\/\//i.test(line)) {
-            list.push({
-              name: currentMeta.name,
-              group: currentMeta.group,
-              url: line,
-              isHttps: /^https:\/\//i.test(line)
-            });
+          // 严格筛选 https:// 链接，确保车机浏览器可直接握手拉流
+          if (/^https:\/\//i.test(line)) {
+            const key = currentMeta.name;
+            if (!channelMap.has(key)) {
+              channelMap.set(key, {
+                name: currentMeta.name,
+                group: currentMeta.group,
+                urls: []
+              });
+            }
+            const item = channelMap.get(key);
+            if (!item.urls.includes(line)) {
+              item.urls.push(line);
+            }
           }
           currentMeta = null;
         }
       }
 
-      // 将 https:// 源排在前面，优先直连起播
-      list.sort((a, b) => (b.isHttps ? 1 : 0) - (a.isHttps ? 1 : 0));
-      return list;
+      return Array.from(channelMap.values());
     }
 
     function renderTvGroups() {
@@ -345,16 +359,49 @@
       statusEl.style.display = 'none';
       const displayList = filtered.slice(0, 200);
       grid.innerHTML = displayList.map((ch) => {
-        const safeUrl = ch.url.replace(/'/g, "\\'");
         const safeName = ch.name.replace(/'/g, "\\'");
-        return `<button class="ep" style="font-size:14px;font-weight:600;" onclick="playParsedTv('${safeName}', '${safeUrl}')">${ch.name}</button>`;
+        const badge = ch.urls.length > 1 ? ` (${ch.urls.length}源)` : '';
+        return `<button class="ep" style="font-size:14px;font-weight:600;" onclick="startChannelWithFallback('${safeName}')">${ch.name}${badge}</button>`;
       }).join('');
     }
 
-    function playParsedTv(name, url) {
+    // 启动频道播放，并支持多线路自动切换
+    function startChannelWithFallback(channelName) {
+      const ch = allTvChannels.find(c => c.name === channelName);
+      if (!ch || !ch.urls.length) return;
       closeTvModal();
+      currentTvQueue = {
+        name: ch.name,
+        urls: ch.urls,
+        index: 0
+      };
+      tryPlayCurrentQueueLine();
+    }
+
+    function tryPlayCurrentQueueLine() {
+      if (!currentTvQueue) return;
+      const { name, urls, index } = currentTvQueue;
+      const url = urls[index];
+      const titleSuffix = urls.length > 1 ? ` [线路 ${index + 1}/${urls.length}]` : '';
+
       if (typeof window.openIptvPlayer === 'function') {
-        window.openIptvPlayer({ name: name, streamUrl: url });
+        window.openIptvPlayer({
+          name: name + titleSuffix,
+          streamUrl: url,
+          onAllFailed: () => {
+            if (currentTvQueue && currentTvQueue.index + 1 < currentTvQueue.urls.length) {
+              currentTvQueue.index++;
+              if (typeof showToast === 'function') {
+                showToast(`线路 ${index + 1} 无响应，自动切换线路 ${currentTvQueue.index + 1}…`);
+              }
+              tryPlayCurrentQueueLine();
+            } else {
+              if (typeof showToast === 'function') {
+                showToast(`${name} 所有备用线路均暂无信号`);
+              }
+            }
+          }
+        });
       }
     }
   </script>
