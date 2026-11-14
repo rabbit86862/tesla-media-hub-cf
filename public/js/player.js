@@ -74,8 +74,8 @@ async function openPlayer(ctx) {
  * ctx: { sourceId, name, type, streamUrl }
  */
 /**
- * 打开 IPTV 频道播放（支持自动全屏 + 直连优先、跨域失败自动回退代理）
- * ctx: { name, streamUrl }
+ * 打开 IPTV 频道播放（支持自动全屏 + 直连优先 + 多线路自动容错切换）
+ * ctx: { name, streamUrl, onAllFailed }
  */
 async function openIptvPlayer(ctx, isFallback = false) {
   // 1. 点击频道时自动请求网页全屏
@@ -95,6 +95,9 @@ async function openIptvPlayer(ctx, isFallback = false) {
     iptvPlayer = null;
   }
   playCtx = null; // 清理可能残留的 applecms 上下文，避免互相干扰
+
+  // 清空点播残留的选集条，避免直播时底部出现多余按钮
+  try { document.getElementById('ep-strip').innerHTML = ''; } catch (e) { /* ignore */ }
 
   const driveView = document.getElementById('drive-view');
   const iptvView = document.getElementById('iptv-view');
@@ -135,6 +138,11 @@ async function openIptvPlayer(ctx, isFallback = false) {
           openIptvPlayer(ctx, true);
           return;
         }
+        // 单条线路直连与代理均失败时，自动切换该频道的下一条备用源
+        if (typeof ctx.onAllFailed === 'function') {
+          ctx.onAllFailed();
+          return;
+        }
         showToast('直播加载失败：' + (e && e.message ? e.message : '频道暂无信号'));
       },
       onEnded: () => showToast('直播已结束'),
@@ -142,6 +150,10 @@ async function openIptvPlayer(ctx, isFallback = false) {
   } catch (e) {
     if (!isFallback && !isHttp) {
       openIptvPlayer(ctx, true);
+      return;
+    }
+    if (typeof ctx.onAllFailed === 'function') {
+      ctx.onAllFailed();
       return;
     }
     showToast('IPTV 播放失败：' + (e && e.message ? e.message : ''));
