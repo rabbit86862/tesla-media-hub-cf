@@ -4,15 +4,85 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <meta name="theme-color" content="#0f1115">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <title>车载影视</title>
   <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* 顶部栏右侧全屏工具组 */
+    #topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .fs-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      padding-right: 12px;
+      flex-shrink: 0;
+    }
+    .fs-btn {
+      background: #1c212b;
+      color: #e6edf3;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .fs-btn:active {
+      background: #2b3342;
+      border-color: #3e88f7;
+    }
+    .fs-btn-theater {
+      background: rgba(62, 136, 247, 0.15);
+      color: #58a6ff;
+      border-color: rgba(62, 136, 247, 0.4);
+    }
+
+    /* 强制全屏状态下的视口锁定，消除黑边与溢出 */
+    html:fullscreen, html:-webkit-full-screen,
+    body:fullscreen, body:-webkit-full-screen {
+      width: 100vw !important;
+      height: 100vh !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      background: #0f1115 !important;
+      overflow: hidden !important;
+    }
+    :fullscreen #player-layer,
+    :-webkit-full-screen #player-layer {
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      z-index: 99999 !important;
+    }
+  </style>
 </head>
 <body>
   <header id="topbar">
-    <button id="btn-back" class="btn-back" onclick="historyBack()">‹</button>
-    <div class="title-wrap">
-      <span id="page-title">车载影视</span>
-      <span id="page-sub" class="page-sub"></span>
+    <div class="topbar-left">
+      <button id="btn-back" class="btn-back" onclick="historyBack()">‹</button>
+      <div class="title-wrap">
+        <span id="page-title">车载影视</span>
+        <span id="page-sub" class="page-sub"></span>
+      </div>
+    </div>
+    <!-- 新增：顶部全屏控制区 -->
+    <div class="fs-actions">
+      <button class="fs-btn fs-btn-theater" onclick="launchTeslaTheater()" title="P档下彻底隐藏顶部地址栏">剧场无边框</button>
+      <button id="btn-web-fs" class="fs-btn" onclick="toggleWebFullscreen()">⛶ 全屏</button>
     </div>
   </header>
 
@@ -23,17 +93,23 @@
     <div class="player-shell">
       <div class="player-head">
         <div class="player-head-left">
-          <button class="player-close" onclick="closePlayer()" aria-label="关闭"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button>
+          <button class="player-close" onclick="exitAndClosePlayer()" aria-label="关闭">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+            </svg>
+          </button>
           <button class="quality-btn" id="btn-quality" style="display:none" onclick="cycleQuality()">清晰度</button>
+          <!-- 播放器内部全屏切换按钮 -->
+          <button class="quality-btn" id="btn-player-fs" onclick="toggleWebFullscreen()">⛶ 全屏</button>
         </div>
         <div class="player-title" id="player-title"></div>
       </div>
       <div id="player-box">
-        <!-- AppleCMS 点播：车机本地 WebCodecs 解码到 Canvas（tesla-media-hub 内置播放库，无 video 标签） -->
+        <!-- AppleCMS 点播：车机本地 WebCodecs 解码到 Canvas -->
         <div id="drive-view" class="drive-view hidden">
           <div id="tesla-host"></div>
         </div>
-        <!-- IPTV：服务端 ffmpeg 转码推流 → tesla-media-hub 内置播放库拉流播放 -->
+        <!-- IPTV：服务端 ffmpeg 转码推流 -->
         <div id="iptv-view" class="drive-view hidden">
           <div id="iptv-host"></div>
         </div>
@@ -46,6 +122,52 @@
   <div id="modal" class="modal hidden"></div>
 
   <div id="toast" class="toast"></div>
+
+  <script>
+    // 1. 网页原生 Fullscreen API 切换
+    function toggleWebFullscreen() {
+      const elem = document.documentElement;
+      const isFs = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!isFs) {
+        if (elem.requestFullscreen) {
+          elem.requestFullscreen().catch(() => {});
+        } else if (elem.webkitRequestFullscreen) {
+          elem.webkitRequestFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {});
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
+        }
+      }
+    }
+
+    // 2. 特斯拉原生剧场模式重定向（彻底隐藏顶部黑色地址栏）
+    function launchTeslaTheater() {
+      const target = encodeURIComponent(window.location.href);
+      window.location.href = 'https://www.youtube.com/redirect?q=' + target;
+    }
+
+    // 3. 关闭播放器时同步保留或退出逻辑
+    function exitAndClosePlayer() {
+      if (typeof closePlayer === 'function') {
+        closePlayer();
+      }
+    }
+
+    // 监听全屏状态变化，同步更新按钮文字
+    function syncFsButtonText() {
+      const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      const label = isFs ? '✕ 退出全屏' : '⛶ 全屏';
+      const topBtn = document.getElementById('btn-web-fs');
+      const playerBtn = document.getElementById('btn-player-fs');
+      if (topBtn) topBtn.textContent = label;
+      if (playerBtn) playerBtn.textContent = label;
+    }
+    document.addEventListener('fullscreenchange', syncFsButtonText);
+    document.addEventListener('webkitfullscreenchange', syncFsButtonText);
+  </script>
 
   <script src="js/api.js"></script>
   <script src="js/player.js"></script>
