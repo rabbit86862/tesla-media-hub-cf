@@ -586,3 +586,57 @@ body:-webkit-full-screen {
   background: #000 !important;
   z-index: 99999 !important;
 }
+
+/* ==========================================================================
+   全屏下隐藏上下控制栏，视频画面 100% 铺满屏幕（轻触屏幕唤出）
+   ========================================================================== */
+
+/* 1. 全屏时取消上下挤压，让视频容器独享 100% 画面 */
+:fullscreen #player-box,
+:-webkit-full-screen #player-box {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 1 !important;
+}
+
+/* 2. 顶部控制栏改为悬浮半透明，默认淡出隐藏 */
+:fullscreen .player-head,
+:-webkit-full-screen .player-head {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  z-index: 20 !important;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent) !important;
+  transition: opacity 0.3s ease, transform 0.3s ease !important;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-100%);
+}
+
+/* 3. 底部选集栏改为悬浮半透明，默认淡出隐藏 */
+:fullscreen .ep-strip,
+:-webkit-full-screen .ep-strip {
+  position: fixed !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  z-index: 20 !important;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.85), transparent) !important;
+  transition: opacity 0.3s ease, transform 0.3s ease !important;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(100%);
+}
+
+/* 4. 触摸屏幕唤醒控制栏时的显示状态 */
+:fullscreen.show-controls .player-head,
+:-webkit-full-screen.show-controls .player-head,
+:fullscreen.show-controls .ep-strip,
+:-webkit-full-screen.show-controls .ep-strip {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
