@@ -79,8 +79,9 @@
         <span id="page-sub" class="page-sub"></span>
       </div>
     </div>
-    <!-- 新增：顶部全屏控制区 -->
+    <!-- 顶部全屏与直播控制区 -->
     <div class="fs-actions">
+      <button class="fs-btn" onclick="openTvModal()" style="border-color:#00b4d8;color:#00b4d8;">📺 电视直播</button>
       <button class="fs-btn fs-btn-theater" onclick="launchTeslaTheater()" title="P档下彻底隐藏顶部地址栏">剧场无边框</button>
       <button id="btn-web-fs" class="fs-btn" onclick="toggleWebFullscreen()">⛶ 全屏</button>
     </div>
@@ -190,6 +191,172 @@
       syncFsButtonText();
       wakeFullscreenControls();
     });
+  </script>
+
+  <!-- 电视直播频道弹窗（自动拉取 Guovin/iptv-api IPv4 订阅源） -->
+  <div id="tv-modal" class="modal hidden" onclick="if(event.target===this)closeTvModal()">
+    <div class="modal-body" style="max-width:760px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <h3 style="margin:0;">📺 电视直播 (IPv4)</h3>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="quality-btn" onclick="loadTvChannels(true)">🔄 刷新源</button>
+          <button class="player-close" onclick="closeTvModal()">✕</button>
+        </div>
+      </div>
+
+      <!-- 频道搜索框 -->
+      <div class="search-row" style="margin-bottom:4px;">
+        <input id="tv-search-input" type="text" placeholder="搜索频道（如：CCTV、卫视、凤凰、中天…）" oninput="renderTvChannels()">
+      </div>
+
+      <!-- 分组标签栏 -->
+      <div id="tv-group-bar" class="tab-bar" style="padding:2px 0 6px;"></div>
+
+      <!-- 状态提示与频道网格 -->
+      <div id="tv-status" class="tip" style="text-align:center;padding:8px 0;"></div>
+      <div id="tv-channel-grid" class="ep-grid" style="grid-template-columns:repeat(auto-fill,minmax(135px,1fr));max-height:52vh;overflow-y:auto;padding-bottom:4px;"></div>
+    </div>
+  </div>
+
+  <script>
+    // Guovin/iptv-api 纯 IPv4 每日自动测速更新订阅源（国内 jsDelivr CDN 加速）
+    const IPTV_M3U_URL = 'https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/ipv4/result.m3u';
+
+    let allTvChannels = [];
+    let currentTvGroup = '全部';
+
+    function openTvModal() {
+      document.getElementById('tv-modal').classList.remove('hidden');
+      if (allTvChannels.length === 0) {
+        loadTvChannels(false);
+      } else {
+        renderTvGroups();
+        renderTvChannels();
+      }
+    }
+
+    function closeTvModal() {
+      document.getElementById('tv-modal').classList.add('hidden');
+    }
+
+    async function loadTvChannels(forceRefresh) {
+      const statusEl = document.getElementById('tv-status');
+      const gridEl = document.getElementById('tv-channel-grid');
+      if (forceRefresh) {
+        allTvChannels = [];
+        gridEl.innerHTML = '';
+      }
+      statusEl.style.display = 'block';
+      statusEl.textContent = '正在同步最新 IPv4 直播源列表…';
+
+      try {
+        let res;
+        try {
+          res = await fetch(IPTV_M3U_URL, { cache: forceRefresh ? 'no-cache' : 'default' });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+        } catch (directErr) {
+          res = await fetch('/api/stream?url=' + encodeURIComponent(IPTV_M3U_URL));
+          if (!res.ok) throw new Error('代理拉取失败 HTTP ' + res.status);
+        }
+
+        const m3uText = await res.text();
+        allTvChannels = parseM3uContent(m3uText);
+
+        if (allTvChannels.length === 0) {
+          statusEl.textContent = '未解析到有效频道，请稍后点击“刷新源”重试';
+          return;
+        }
+
+        statusEl.style.display = 'none';
+        renderTvGroups();
+        renderTvChannels();
+      } catch (err) {
+        statusEl.textContent = '直播源加载失败：' + (err.message || '网络异常');
+      }
+    }
+
+    function parseM3uContent(text) {
+      const lines = text.split(/\r?\n/);
+      const list = [];
+      let currentMeta = null;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        if (line.startsWith('#EXTINF:')) {
+          const groupMatch = line.match(/group-title="([^"]*)"/i);
+          const commaIdx = line.lastIndexOf(',');
+          const name = commaIdx !== -1 ? line.slice(commaIdx + 1).trim() : '未知频道';
+          const group = (groupMatch && groupMatch[1].trim()) ? groupMatch[1].trim() : '其他';
+          currentMeta = { name, group };
+        } else if (!line.startsWith('#') && currentMeta) {
+          if (/^https?:\/\//i.test(line)) {
+            list.push({
+              name: currentMeta.name,
+              group: currentMeta.group,
+              url: line,
+              isHttps: /^https:\/\//i.test(line)
+            });
+          }
+          currentMeta = null;
+        }
+      }
+
+      // 将 https:// 源排在前面，优先直连起播
+      list.sort((a, b) => (b.isHttps ? 1 : 0) - (a.isHttps ? 1 : 0));
+      return list;
+    }
+
+    function renderTvGroups() {
+      const groupBar = document.getElementById('tv-group-bar');
+      const groups = ['全部', ...new Set(allTvChannels.map(c => c.group))];
+      if (!groups.includes(currentTvGroup)) currentTvGroup = '全部';
+
+      groupBar.innerHTML = groups.map(g =>
+        `<button class="tab ${g === currentTvGroup ? 'active' : ''}" onclick="selectTvGroup('${g.replace(/'/g, "\\'")}')">${g}</button>`
+      ).join('');
+    }
+
+    function selectTvGroup(group) {
+      currentTvGroup = group;
+      renderTvGroups();
+      renderTvChannels();
+    }
+
+    function renderTvChannels() {
+      const grid = document.getElementById('tv-channel-grid');
+      const statusEl = document.getElementById('tv-status');
+      const keyword = (document.getElementById('tv-search-input').value || '').trim().toLowerCase();
+
+      const filtered = allTvChannels.filter(ch => {
+        const matchGroup = (currentTvGroup === '全部' || ch.group === currentTvGroup);
+        const matchKeyword = !keyword || ch.name.toLowerCase().includes(keyword);
+        return matchGroup && matchKeyword;
+      });
+
+      if (filtered.length === 0) {
+        grid.innerHTML = '';
+        statusEl.style.display = 'block';
+        statusEl.textContent = '没有匹配的频道';
+        return;
+      }
+
+      statusEl.style.display = 'none';
+      const displayList = filtered.slice(0, 200);
+      grid.innerHTML = displayList.map((ch) => {
+        const safeUrl = ch.url.replace(/'/g, "\\'");
+        const safeName = ch.name.replace(/'/g, "\\'");
+        return `<button class="ep" style="font-size:14px;font-weight:600;" onclick="playParsedTv('${safeName}', '${safeUrl}')">${ch.name}</button>`;
+      }).join('');
+    }
+
+    function playParsedTv(name, url) {
+      closeTvModal();
+      if (typeof window.openIptvPlayer === 'function') {
+        window.openIptvPlayer({ name: name, streamUrl: url });
+      }
+    }
   </script>
 
   <script src="js/api.js"></script>
