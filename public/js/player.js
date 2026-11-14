@@ -73,7 +73,23 @@ async function openPlayer(ctx) {
  * 打开 IPTV 频道播放（服务端 ffmpeg 转码推流 → tesla-media-hub 内置播放库拉流）
  * ctx: { sourceId, name, type, streamUrl }
  */
-async function openIptvPlayer(ctx) {
+/**
+ * 打开 IPTV 频道播放（支持自动全屏 + 直连优先、跨域失败自动回退代理）
+ * ctx: { name, streamUrl }
+ */
+async function openIptvPlayer(ctx, isFallback = false) {
+  // 1. 点击频道时自动请求网页全屏
+  try {
+    const elem = document.documentElement;
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+      if (elem.requestFullscreen) {
+        elem.requestFullscreen().catch(() => {});
+      } else if (elem.webkitRequestFullscreen) {
+        elem.webkitRequestFullscreen();
+      }
+    }
+  } catch (e) { /* ignore */ }
+
   if (iptvPlayer) {
     try { iptvPlayer.destroy(); } catch (e) { /* ignore */ }
     iptvPlayer = null;
@@ -86,7 +102,7 @@ async function openIptvPlayer(ctx) {
   const titleEl = document.getElementById('player-title');
   const qBtn = document.getElementById('btn-quality');
 
-  titleEl.textContent = ctx.name || 'IPTV';
+  titleEl.textContent = ctx.name || '电视直播';
   if (qBtn) qBtn.style.display = 'none';
 
   playerLayer.classList.remove('hidden');
@@ -96,23 +112,38 @@ async function openIptvPlayer(ctx) {
   if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
 
   if (!window.IptvAdapter || !window.IptvAdapter.isSupported()) {
-    showToast('当前浏览器不支持 WebCodecs（IPTV 播放所需）');
+    showToast('当前浏览器不支持 WebCodecs');
     return;
   }
 
+  // 若为 http:// 明文流或已触发回退，则自动走 /api/stream 代理包装
+  const isHttp = /^http:\/\//i.test(ctx.streamUrl);
+  const playUrl = (isFallback || isHttp) ? proxyUrl(ctx.streamUrl) : ctx.streamUrl;
   showToast('正在加载 ' + (ctx.name || '频道'));
+
   try {
-    iptvPlayer = await window.IptvAdapter.createPlayer(host, ctx.streamUrl, {
+    iptvPlayer = await window.IptvAdapter.createPlayer(host, playUrl, {
       live: true,
       onFirstFrame: () => {
         const t = document.getElementById('toast');
         if (t) t.classList.remove('show');
       },
       onStatus: (msg) => showToast(msg),
-      onError: (e) => showToast('播放出错：' + (e && e.message ? e.message : '未知错误')),
+      onError: (e) => {
+        if (!isFallback && !isHttp) {
+          showToast('直连受限，正在尝试代理通道拉流…');
+          openIptvPlayer(ctx, true);
+          return;
+        }
+        showToast('直播加载失败：' + (e && e.message ? e.message : '频道暂无信号'));
+      },
       onEnded: () => showToast('直播已结束'),
     });
   } catch (e) {
+    if (!isFallback && !isHttp) {
+      openIptvPlayer(ctx, true);
+      return;
+    }
     showToast('IPTV 播放失败：' + (e && e.message ? e.message : ''));
   }
 }
