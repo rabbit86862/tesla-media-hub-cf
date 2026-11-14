@@ -40,6 +40,18 @@ function proxyUrl(raw) {
 }
 
 async function openPlayer(ctx) {
+  // 【新增】点击影片进入播放时自动请求网页全屏
+  try {
+    const elem = document.documentElement;
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+      if (elem.requestFullscreen) {
+        elem.requestFullscreen().catch(() => {});
+      } else if (elem.webkitRequestFullscreen) {
+        elem.webkitRequestFullscreen();
+      }
+    }
+  } catch (e) { /* ignore */ }
+  
   // 销毁可能存在的播放实例（包括 AppleCMS/IPTv 任一模式）
   if (iptvPlayer) {
     try { iptvPlayer.destroy(); } catch (e) { /* ignore */ }
