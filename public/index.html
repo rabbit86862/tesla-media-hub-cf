@@ -260,23 +260,26 @@
         gridEl.innerHTML = '';
       }
       statusEl.style.display = 'block';
-      statusEl.textContent = '正在同步并筛选可直连的 HTTPS 频道…';
+      statusEl.textContent = '正在同步最新 HTTPS 频道列表…';
 
       try {
-        let res;
-        try {
-          res = await fetch(m3uUrl, { cache: forceRefresh ? 'no-cache' : 'default' });
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-        } catch (directErr) {
-          res = await fetch('/api/stream?url=' + encodeURIComponent(m3uUrl));
-          if (!res.ok) throw new Error('拉取失败 HTTP ' + res.status);
+        let res = await fetch(m3uUrl, { cache: forceRefresh ? 'no-cache' : 'default' });
+        
+        // 若 testingcf 节点偶发波动，自动切换 fastly 节点重试
+        if (!res.ok && m3uUrl.includes('testingcf.jsdelivr.net')) {
+          const backupUrl = m3uUrl.replace('testingcf.jsdelivr.net', 'fastly.jsdelivr.net');
+          res = await fetch(backupUrl, { cache: 'no-cache' });
+        }
+
+        if (!res.ok) {
+          throw new Error(`源站返回 HTTP ${res.status}，请切换其他订阅源`);
         }
 
         const m3uText = await res.text();
         allTvChannels = parseAndGroupM3u(m3uText);
 
         if (allTvChannels.length === 0) {
-          statusEl.textContent = '当前订阅源暂无可用的 HTTPS 直连频道，请在右上角切换其他订阅源';
+          statusEl.textContent = '当前订阅源暂无可用的 HTTPS 频道，请在右上角切换其他订阅源';
           return;
         }
 
@@ -284,7 +287,7 @@
         renderTvGroups();
         renderTvChannels();
       } catch (err) {
-        statusEl.textContent = '直播源加载失败：' + (err.message || '网络异常');
+        statusEl.textContent = '加载失败：' + (err.message || '网络异常');
       }
     }
 
