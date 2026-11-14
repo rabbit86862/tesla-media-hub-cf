@@ -32,7 +32,7 @@ function isSupported() {
 
 const DECODE_PRESET_HARDWARE = 'hardware';
 const DECODE_PRESET_SOFTWARE = 'software';
-const FIRST_FRAME_TIMEOUT_MS = 15000;
+const FIRST_FRAME_TIMEOUT_MS = 6000;
 
 async function createPlayer(hostEl, url, opts = {}) {
   if (!isSupported()) throw new Error('当前浏览器不支持 WebCodecs（播放所需）');
