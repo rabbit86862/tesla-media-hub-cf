@@ -156,7 +156,7 @@
       }
     }
 
-    // 监听全屏状态变化，同步更新按钮文字
+    // 监听全屏状态变化，同步更新按钮文字与控制栏自动隐藏
     function syncFsButtonText() {
       const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
       const label = isFs ? '✕ 退出全屏' : '⛶ 全屏';
@@ -165,8 +165,31 @@
       if (topBtn) topBtn.textContent = label;
       if (playerBtn) playerBtn.textContent = label;
     }
-    document.addEventListener('fullscreenchange', syncFsButtonText);
-    document.addEventListener('webkitfullscreenchange', syncFsButtonText);
+
+    // 全屏状态下：轻触屏幕显示上下控制栏，3 秒无操作自动隐藏
+    let ctrlHideTimer = null;
+    function wakeFullscreenControls() {
+      const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      if (!isFs) {
+        document.documentElement.classList.remove('show-controls');
+        return;
+      }
+      document.documentElement.classList.add('show-controls');
+      clearTimeout(ctrlHideTimer);
+      ctrlHideTimer = setTimeout(() => {
+        document.documentElement.classList.remove('show-controls');
+      }, 3000);
+    }
+
+    document.addEventListener('pointerdown', wakeFullscreenControls);
+    document.addEventListener('fullscreenchange', () => {
+      syncFsButtonText();
+      wakeFullscreenControls();
+    });
+    document.addEventListener('webkitfullscreenchange', () => {
+      syncFsButtonText();
+      wakeFullscreenControls();
+    });
   </script>
 
   <script src="js/api.js"></script>
