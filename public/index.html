@@ -110,7 +110,7 @@
         <div id="drive-view" class="drive-view hidden">
           <div id="tesla-host"></div>
         </div>
-        <!-- IPTV：服务端 ffmpeg 转码推流 -->
+        <!-- IPTV：WebCodecs 直播解码 -->
         <div id="iptv-view" class="drive-view hidden">
           <div id="iptv-host"></div>
         </div>
@@ -144,13 +144,13 @@
       }
     }
 
-    // 2. 特斯拉原生剧场模式重定向（彻底隐藏顶部黑色地址栏）
+    // 2. 特斯拉原生剧场模式重定向（需 P 档且网络可访问 YouTube 跳转页）
     function launchTeslaTheater() {
       const target = encodeURIComponent(window.location.href);
       window.location.href = 'https://www.youtube.com/redirect?q=' + target;
     }
 
-    // 3. 关闭播放器时同步保留或退出逻辑
+    // 3. 关闭播放器
     function exitAndClosePlayer() {
       if (typeof closePlayer === 'function') {
         closePlayer();
@@ -193,23 +193,19 @@
     });
   </script>
 
-  <!-- 电视直播频道弹窗（自动过滤 HTTPS 直连源 + 同频道多线路自动容错） -->
+  <!-- 电视直播频道弹窗（触屏直选源 + 自动过滤 HTTPS + 多线路容错） -->
   <div id="tv-modal" class="modal hidden" onclick="if(event.target===this)closeTvModal()">
     <div class="modal-body" style="max-width:760px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
         <h3 style="margin:0;">📺 电视直播（HTTPS 直连）</h3>
         <div style="display:flex;gap:8px;align-items:center;">
-          <!-- 切换不同订阅源 -->
-          <select id="tv-source-select" onchange="loadTvChannels(true)" style="min-height:38px;padding:4px 10px;font-size:14px;width:auto;">
-            <option value="https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/result.m3u">源1：Guovin 综合优选</option>
-            <option value="https://testingcf.jsdelivr.net/gh/Kimentanm/aptv@master/m3u/iptv.m3u">源2：APTV 精品高清（适配最佳）</option>
-            <option value="https://live.zbds.top/tv/iptv4.m3u">源3：ZBDS 独立加速源（6小时更新）</option>
-            <option value="https://testingcf.jsdelivr.net/gh/hujingguang/ChinaIPTV@main/cnTV_AutoUpdate.m3u8">源4：ChinaIPTV 自动更新源</option>
-          </select>
           <button class="quality-btn" style="min-height:38px;" onclick="loadTvChannels(true)">🔄 刷新</button>
           <button class="player-close" style="min-height:38px;" onclick="closeTvModal()">✕</button>
         </div>
       </div>
+
+      <!-- 订阅源触屏切换按钮（替代车机弹窗中无法点按的 select 下拉框） -->
+      <div id="tv-source-bar" class="tab-bar" style="padding:4px 0;"></div>
 
       <!-- 频道搜索框 -->
       <div class="search-row" style="margin-bottom:4px;">
@@ -221,16 +217,41 @@
 
       <!-- 状态提示与频道网格 -->
       <div id="tv-status" class="tip" style="text-align:center;padding:8px 0;"></div>
-      <div id="tv-channel-grid" class="ep-grid" style="grid-template-columns:repeat(auto-fill,minmax(135px,1fr));max-height:50vh;overflow-y:auto;padding-bottom:4px;"></div>
+      <div id="tv-channel-grid" class="ep-grid" style="grid-template-columns:repeat(auto-fill,minmax(135px,1fr));max-height:48vh;overflow-y:auto;padding-bottom:4px;"></div>
     </div>
   </div>
 
   <script>
-    let allTvChannels = [];   // 合并后的频道列表: [{ name, group, urls: [...] }]
+    // 已验证可用的 HTTPS 自动更新订阅源
+    const TV_SOURCES = [
+      { name: '源1：Guovin 综合', url: 'https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/result.m3u' },
+      { name: '源2：APTV 精品', url: 'https://testingcf.jsdelivr.net/gh/Kimentanm/aptv@master/m3u/iptv.m3u' },
+      { name: '源3：ZBDS 加速源', url: 'https://live.zbds.top/tv/iptv4.m3u' },
+      { name: '源4：ChinaIPTV', url: 'https://testingcf.jsdelivr.net/gh/hujingguang/ChinaIPTV@main/cnTV_AutoUpdate.m3u8' }
+    ];
+
+    let currentSourceIdx = 0;
+    let allTvChannels = [];
     let currentTvGroup = '全部';
-    let currentTvQueue = null; // 当前正在播放的频道多线路队列: { name, urls, index }
+    let currentTvQueue = null;
+
+    function renderTvSourceBar() {
+      const bar = document.getElementById('tv-source-bar');
+      if (!bar) return;
+      bar.innerHTML = TV_SOURCES.map((src, idx) =>
+        `<button class="tab ${idx === currentSourceIdx ? 'active' : ''}" onclick="switchTvSource(${idx})">${src.name}</button>`
+      ).join('');
+    }
+
+    function switchTvSource(idx) {
+      if (idx === currentSourceIdx && allTvChannels.length > 0) return;
+      currentSourceIdx = idx;
+      renderTvSourceBar();
+      loadTvChannels(true);
+    }
 
     function openTvModal() {
+      renderTvSourceBar();
       document.getElementById('tv-modal').classList.remove('hidden');
       if (allTvChannels.length === 0) {
         loadTvChannels(false);
@@ -247,8 +268,7 @@
     async function loadTvChannels(forceRefresh) {
       const statusEl = document.getElementById('tv-status');
       const gridEl = document.getElementById('tv-channel-grid');
-      const selectEl = document.getElementById('tv-source-select');
-      const m3uUrl = selectEl ? selectEl.value : 'https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/result.m3u';
+      const m3uUrl = (TV_SOURCES[currentSourceIdx] || TV_SOURCES[0]).url;
 
       if (forceRefresh) {
         allTvChannels = [];
@@ -259,22 +279,19 @@
 
       try {
         let res = await fetch(m3uUrl, { cache: forceRefresh ? 'no-cache' : 'default' });
-        
-        // 若 testingcf 节点偶发波动，自动切换 fastly 节点重试
         if (!res.ok && m3uUrl.includes('testingcf.jsdelivr.net')) {
           const backupUrl = m3uUrl.replace('testingcf.jsdelivr.net', 'fastly.jsdelivr.net');
           res = await fetch(backupUrl, { cache: 'no-cache' });
         }
-
         if (!res.ok) {
-          throw new Error(`源站返回 HTTP ${res.status}，请切换其他订阅源`);
+          throw new Error(`源站返回 HTTP ${res.status}，请点击上方切换其他源`);
         }
 
         const m3uText = await res.text();
         allTvChannels = parseAndGroupM3u(m3uText);
 
         if (allTvChannels.length === 0) {
-          statusEl.textContent = '当前订阅源暂无可用的 HTTPS 频道，请在右上角切换其他订阅源';
+          statusEl.textContent = '当前源暂无可用的 HTTPS 频道，请点击上方切换其他源';
           return;
         }
 
@@ -286,7 +303,6 @@
       }
     }
 
-    // 解析 M3U：仅保留 https:// 链接（彻底避开浏览器拦截与境外代理超时），并合并同名频道的多条备用线路
     function parseAndGroupM3u(text) {
       const lines = text.split(/\r?\n/);
       const channelMap = new Map();
@@ -303,7 +319,6 @@
           const group = (groupMatch && groupMatch[1].trim()) ? groupMatch[1].trim() : '精选频道';
           currentMeta = { name, group };
         } else if (!line.startsWith('#') && currentMeta) {
-          // 严格筛选 https:// 链接，确保车机浏览器可直接握手拉流
           if (/^https:\/\//i.test(line)) {
             const key = currentMeta.name;
             if (!channelMap.has(key)) {
@@ -321,7 +336,6 @@
           currentMeta = null;
         }
       }
-
       return Array.from(channelMap.values());
     }
 
@@ -368,7 +382,6 @@
       }).join('');
     }
 
-    // 启动频道播放，并支持多线路自动切换
     function startChannelWithFallback(channelName) {
       const ch = allTvChannels.find(c => c.name === channelName);
       if (!ch || !ch.urls.length) return;
