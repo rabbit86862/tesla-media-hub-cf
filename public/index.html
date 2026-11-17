@@ -79,8 +79,9 @@
         <span id="page-sub" class="page-sub"></span>
       </div>
     </div>
-    <!-- 顶部全屏与直播控制区 -->
+    <!-- 顶部续播、直播与全屏控制区 -->
     <div class="fs-actions">
+      <button class="fs-btn" onclick="resumeLastWatch(0)" style="border-color:#3fb950;color:#3fb950;">🕒 继续观看</button>
       <button class="fs-btn" onclick="openTvModal()" style="border-color:#00b4d8;color:#00b4d8;">📺 电视直播</button>
       <button class="fs-btn fs-btn-theater" onclick="launchTeslaTheater()" title="P档下彻底隐藏顶部地址栏">剧场无边框</button>
       <button id="btn-web-fs" class="fs-btn" onclick="toggleWebFullscreen()">⛶ 全屏</button>
@@ -150,10 +151,13 @@
       window.location.href = 'https://www.youtube.com/redirect?q=' + target;
     }
 
-    // 3. 关闭播放器
+    // 3. 关闭播放器（同步刷新首页续播卡片）
     function exitAndClosePlayer() {
       if (typeof closePlayer === 'function') {
         closePlayer();
+      }
+      if (location.hash === '' || location.hash === '#/' || location.hash === '#') {
+        if (typeof renderHome === 'function') renderHome();
       }
     }
 
@@ -227,7 +231,7 @@
       { name: '源1：Guovin 综合', url: 'https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/result.m3u' },
       { name: '源2：APTV 精品', url: 'https://testingcf.jsdelivr.net/gh/Kimentanm/aptv@master/m3u/iptv.m3u' },
       { name: '源3：ZBDS 加速源', url: 'https://live.zbds.top/tv/iptv4.m3u' },
-      { name: '源4：Skddyj 测速源', url: 'https://testingcf.jsdelivr.net/gh/skddyj/iptv@master/output/result.m3u' }
+      { name: '源4：ChinaIPTV', url: 'https://testingcf.jsdelivr.net/gh/hujingguang/ChinaIPTV@main/cnTV_AutoUpdate.m3u8' }
     ];
 
     let currentSourceIdx = 0;
@@ -303,10 +307,25 @@
       }
     }
 
+    // 兼容解析标准 M3U (#EXTINF) 与 TVBox TXT (#genre#) 双格式，自动筛选 https:// 直连源
     function parseAndGroupM3u(text) {
       const lines = text.split(/\r?\n/);
       const channelMap = new Map();
       let currentMeta = null;
+      let currentTxtGroup = '精选频道';
+
+      const addChannelUrl = (name, group, url) => {
+        if (!/^https:\/\//i.test(url)) return;
+        const cleanName = name.trim() || '未知频道';
+        const cleanGroup = group.trim() || '精选频道';
+        if (!channelMap.has(cleanName)) {
+          channelMap.set(cleanName, { name: cleanName, group: cleanGroup, urls: [] });
+        }
+        const item = channelMap.get(cleanName);
+        if (!item.urls.includes(url)) {
+          item.urls.push(url);
+        }
+      };
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
@@ -319,21 +338,17 @@
           const group = (groupMatch && groupMatch[1].trim()) ? groupMatch[1].trim() : '精选频道';
           currentMeta = { name, group };
         } else if (!line.startsWith('#') && currentMeta) {
-          if (/^https:\/\//i.test(line)) {
-            const key = currentMeta.name;
-            if (!channelMap.has(key)) {
-              channelMap.set(key, {
-                name: currentMeta.name,
-                group: currentMeta.group,
-                urls: []
-              });
-            }
-            const item = channelMap.get(key);
-            if (!item.urls.includes(line)) {
-              item.urls.push(line);
-            }
-          }
+          addChannelUrl(currentMeta.name, currentMeta.group, line);
           currentMeta = null;
+        } else if (line.includes('#genre#')) {
+          currentTxtGroup = line.split(',')[0].trim() || '精选频道';
+        } else if (!line.startsWith('#') && line.includes(',http')) {
+          const commaIdx = line.indexOf(',');
+          const name = line.slice(0, commaIdx).trim();
+          const url = line.slice(commaIdx + 1).trim();
+          url.split('#').forEach(singleUrl => {
+            addChannelUrl(name, currentTxtGroup, singleUrl.trim());
+          });
         }
       }
       return Array.from(channelMap.values());
