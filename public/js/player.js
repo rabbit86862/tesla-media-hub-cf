@@ -1,5 +1,5 @@
 /**
- * 播放器层：适配车载大屏触摸
+ * 播放器层：适配车载大屏触摸（含断点记忆与自动续播）
  * 统一播放引擎（tesla-media-hub 内置播放库，基于 wody11/Tesla-VideoPlayer）：
  *   - 完全无 <video> 标签，纯 WebCodecs 解码 → Canvas 渲染
  *   - AppleCMS 点播：浏览器直连源站 HLS/MP4（不走服务端，零服务器负载）
@@ -14,6 +14,97 @@ let startupTimer = null;   // 点播首帧超时诊断：黑屏无提示时给�
 let lastFramePaused = false; // 末集/单集：已在最后一秒暂停画面，避免重复暂停与误触发续播
 const LAST_FRAME_PAUSE_SEC = 1; // 距离片尾不足该秒数时暂停在末帧
 
+// ==================== 断点续播存储模块 ====================
+const VOD_HISTORY_KEY = 'tesla_vod_history_v1';
+const VOD_HISTORY_MAX = 15;
+let lastHistorySaveTs = 0;
+
+function getVodHistoryKey(ctx) {
+  if (!ctx) return '';
+  if (ctx.directPlay) return 'webdav::' + (ctx.vodName || '');
+  return (ctx.siteKey || 'default') + '::' + (ctx.vodId || ctx.vodName || '');
+}
+
+function getAllVodHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(VOD_HISTORY_KEY) || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function getVodHistoryItem(ctx) {
+  const key = getVodHistoryKey(ctx);
+  if (!key) return null;
+  return getAllVodHistory().find(item => item.key === key) || null;
+}
+
+function formatDurationSec(sec) {
+  const s = Math.max(0, Math.floor(sec || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+  }
+  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+}
+
+function saveVodProgress(ctx, currentTime, duration, force = false) {
+  if (!ctx || !ctx.vodName) return;
+  const now = Date.now();
+  if (!force && now - lastHistorySaveTs < 5000) return;
+  lastHistorySaveTs = now;
+
+  const t = Math.floor(currentTime || 0);
+  const d = Math.floor(duration || 0);
+  // 播放不足 5 秒不覆盖已有进度（防止刚打开未 seek 前的 0 秒覆盖旧记录）
+  if (t < 5 && !force) return;
+
+  const key = getVodHistoryKey(ctx);
+  const flag = (ctx.plays && ctx.plays[ctx.flagIdx]) || {};
+  const ep = (flag.episodes || [])[ctx.curEp] || {};
+  const epName = ep.name || ('第' + (ctx.curEp + 1) + '集');
+
+  // 若本集剩余不足 15 秒，自动将续播点推进到下一集开头
+  let saveEp = ctx.curEp;
+  let saveTime = t;
+  let saveEpName = epName;
+  const eps = flag.episodes || [];
+  if (d > 0 && d - t <= 15) {
+    if (ctx.curEp + 1 < eps.length) {
+      saveEp = ctx.curEp + 1;
+      saveTime = 0;
+      saveEpName = (eps[saveEp] && eps[saveEp].name) || ('第' + (saveEp + 1) + '集');
+    } else {
+      saveTime = 0; // 已全部看完，下次从头看
+    }
+  }
+
+  let list = getAllVodHistory().filter(item => item.key !== key);
+  list.unshift({
+    key,
+    siteKey: ctx.siteKey || '',
+    vodId: ctx.vodId || '',
+    vodName: ctx.vodName,
+    poster: ctx.poster || '',
+    plays: ctx.plays || [],
+    flagIdx: ctx.flagIdx || 0,
+    curEp: saveEp,
+    epName: saveEpName,
+    time: saveTime,
+    duration: d,
+    directPlay: !!ctx.directPlay,
+    updatedAt: now
+  });
+
+  if (list.length > VOD_HISTORY_MAX) list = list.slice(0, VOD_HISTORY_MAX);
+  try {
+    localStorage.setItem(VOD_HISTORY_KEY, JSON.stringify(list));
+  } catch (e) { /* 存储满时忽略 */ }
+}
+// =========================================================
+
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -22,10 +113,6 @@ function esc(s) {
 
 /**
  * 将第三方播放地址改写为同源流媒体代理地址，绕过源站防盗链 / 跨域限制。
- * - blob:/data: 等浏览器本地地址原样返回
- * - 已是 /api/stream 的地址（幂等）原样返回，并补齐为绝对 URL
- * - 仅对 http(s) 绝对地址进行代理包装
- * 注意：AVPlayer 在 Web Worker 中拉流，Worker 内无法解析相对 URL，因此必须返回绝对地址。
  */
 function proxyUrl(raw) {
   if (!raw) return raw;
@@ -40,7 +127,7 @@ function proxyUrl(raw) {
 }
 
 async function openPlayer(ctx) {
-  // 【新增】点击影片进入播放时自动请求网页全屏
+  // 点击影片进入播放时自动请求网页全屏
   try {
     const elem = document.documentElement;
     if (!document.fullscreenElement && !document.webkitFullscreenElement) {
@@ -51,34 +138,56 @@ async function openPlayer(ctx) {
       }
     }
   } catch (e) { /* ignore */ }
-  
-  // 销毁可能存在的播放实例（包括 AppleCMS/IPTv 任一模式）
+
+  // 销毁可能存在的播放实例
   if (iptvPlayer) {
     try { iptvPlayer.destroy(); } catch (e) { /* ignore */ }
     iptvPlayer = null;
   }
+
+  // 查询历史观看记录，自动恢复集数与断点时间
+  const saved = getVodHistoryItem(ctx);
+  let targetFlagIdx = ctx.flagIdx || 0;
+  let targetEp = ctx.startEp;
+  let pendingSeekTime = ctx.resumeTime || 0;
+
+  if (saved) {
+    // 若调用方未指定具体集数（如从搜索/列表点击影片进入），自动恢复上次观看的线路与集数
+    if (targetEp === undefined || targetEp === null) {
+      if (ctx.plays && ctx.plays[saved.flagIdx]) {
+        targetFlagIdx = saved.flagIdx;
+      }
+      targetEp = saved.curEp || 0;
+      if (!pendingSeekTime && saved.time > 5) {
+        pendingSeekTime = saved.time;
+      }
+    } else if (targetEp === saved.curEp && !pendingSeekTime && saved.time > 5) {
+      // 若点击的正好是上次观看的那一集，同样自动定位到断点
+      pendingSeekTime = saved.time;
+    }
+  }
+
   playCtx = {
     ...ctx,
-    curEp: ctx.startEp || 0,
+    flagIdx: targetFlagIdx,
+    curEp: targetEp || 0,
     qualityIdx: -1,
     urls: [],
-    lastUrl: '',        // 当前集解析后的真实播放地址
+    lastUrl: '',
+    _pendingSeek: pendingSeekTime,
+    _curTime: 0,
+    _duration: 0,
   };
+
   playerLayer.classList.remove('hidden');
   renderEpStrip();
-  await playCurrent();
+  await playCurrent(pendingSeekTime > 5);
 }
 
 /**
- * 打开 IPTV 频道播放（服务端 ffmpeg 转码推流 → tesla-media-hub 内置播放库拉流）
- * ctx: { sourceId, name, type, streamUrl }
- */
-/**
  * 打开 IPTV 频道播放（支持自动全屏 + 直连优先 + 多线路自动容错切换）
- * ctx: { name, streamUrl, onAllFailed }
  */
 async function openIptvPlayer(ctx, isFallback = false) {
-  // 1. 点击频道时自动请求网页全屏
   try {
     const elem = document.documentElement;
     if (!document.fullscreenElement && !document.webkitFullscreenElement) {
@@ -94,9 +203,8 @@ async function openIptvPlayer(ctx, isFallback = false) {
     try { iptvPlayer.destroy(); } catch (e) { /* ignore */ }
     iptvPlayer = null;
   }
-  playCtx = null; // 清理可能残留的 applecms 上下文，避免互相干扰
+  playCtx = null;
 
-  // 清空点播残留的选集条，避免直播时底部出现多余按钮
   try { document.getElementById('ep-strip').innerHTML = ''; } catch (e) { /* ignore */ }
 
   const driveView = document.getElementById('drive-view');
@@ -119,7 +227,6 @@ async function openIptvPlayer(ctx, isFallback = false) {
     return;
   }
 
-  // 若为 http:// 明文流或已触发回退，则自动走 /api/stream 代理包装
   const isHttp = /^http:\/\//i.test(ctx.streamUrl);
   const playUrl = (isFallback || isHttp) ? proxyUrl(ctx.streamUrl) : ctx.streamUrl;
   showToast('正在加载 ' + (ctx.name || '频道'));
@@ -138,7 +245,6 @@ async function openIptvPlayer(ctx, isFallback = false) {
           openIptvPlayer(ctx, true);
           return;
         }
-        // 单条线路直连与代理均失败时，自动切换该频道的下一条备用源
         if (typeof ctx.onAllFailed === 'function') {
           ctx.onAllFailed();
           return;
@@ -172,12 +278,10 @@ async function applyMode() {
   const driveHost = document.getElementById('tesla-host');
   const iptvView = document.getElementById('iptv-view');
 
-  // 切到 AppleCMS 视图（drive-view 容器），隐藏 iptv-view
   iptvView.classList.add('hidden');
   driveView.classList.remove('hidden');
   driveHost.classList.remove('hidden');
 
-  // 销毁可能残留的播放实例
   if (iptvPlayer) {
     try { iptvPlayer.destroy(); } catch (e) { /* ignore */ }
     iptvPlayer = null;
@@ -188,11 +292,9 @@ async function applyMode() {
     return;
   }
 
-  // 默认直接直连源站（秒开零等待）；若直连失败（跨域受限）才回退走代理通道
   ctx.lastUrl = ctx._fallback ? proxyUrl(ctx.rawUrl) : ctx.rawUrl;
 
   if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
-  // 首帧超时提示：解码/渲染若静默失败（黑屏无报错），主动给出可能原因
   startupTimer = setTimeout(() => {
     startupTimer = null;
     showToast('首帧等待超时：该片源可能为车机不支持的编码（如 HEVC/H265）或解码缓慢，可尝试切换线路');
@@ -203,10 +305,22 @@ async function applyMode() {
       live: false,
       onFirstFrame: () => {
         if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
+        // 首帧解码渲染完成后，若存在历史断点则自动跳转
+        if (playCtx && playCtx._pendingSeek > 5 && iptvPlayer) {
+          const targetSec = playCtx._pendingSeek;
+          playCtx._pendingSeek = 0;
+          setTimeout(() => {
+            try {
+              if (iptvPlayer && typeof iptvPlayer.seek === 'function') {
+                iptvPlayer.seek(targetSec);
+                showToast(`已自动接续至 ${formatDurationSec(targetSec)}`);
+              }
+            } catch (err) { /* ignore */ }
+          }, 250);
+        }
       },
       onError: (e) => {
         if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
-        // 直连失败（如源站限制浏览器跨域）→ 自动回退走 Worker 代理中转通道（仅一次）
         if (!ctx._fallback && !ctx._fallbackTried) {
           ctx._fallbackTried = true;
           ctx._fallback = true;
@@ -216,19 +330,27 @@ async function applyMode() {
         }
         showToast('播放出错：' + (e && e.message ? e.message : '未知错误'));
       },
-      // 时间更新：末集/单集在最后一秒暂停画面，保留末帧（不黑屏、不销毁）
+      // 时间更新：实时保存播放进度 + 末集停在末帧
       onTime: (currentTime, duration) => {
         const c = playCtx;
-        if (!c || !c.isLastEp) return;          // 非末集不处理（由 onEnded 自动续播）
-        if (lastFramePaused) return;            // 已暂停，跳过
-        if (!duration || duration <= 0) return;  // 直播/时长未知不处理
+        if (!c) return;
+        c._curTime = currentTime;
+        c._duration = duration;
+
+        // 每 5 秒自动记录一次当前剧集与秒数
+        saveVodProgress(c, currentTime, duration, false);
+
+        if (!c.isLastEp) return;
+        if (lastFramePaused) return;
+        if (!duration || duration <= 0) return;
         if (duration - currentTime <= LAST_FRAME_PAUSE_SEC) {
           lastFramePaused = true;
+          saveVodProgress(c, currentTime, duration, true);
           try { iptvPlayer && iptvPlayer.pause(); } catch (_) { /* ignore */ }
           showToast('已播至本片结尾（末集）');
         }
       },
-      // 播放结束：非末集自动续播下一集；末集由 onTime 已暂停在末帧，此处兜底
+      // 播放结束：非末集自动续播下一集并更新记录；末集停在末帧
       onEnded: () => {
         const c = playCtx;
         if (!c) return;
@@ -240,8 +362,8 @@ async function applyMode() {
             switchEp(next);
           }
         } else if (iptvPlayer && !lastFramePaused) {
-          // 兜底：极端情况下 onTime 未命中，则在此暂停保持末帧
           lastFramePaused = true;
+          saveVodProgress(c, c._duration, c._duration, true);
           try { iptvPlayer.pause(); } catch (_) { /* ignore */ }
         }
       },
@@ -273,9 +395,13 @@ function renderEpStrip() {
 
 async function switchEp(i) {
   const ctx = playCtx;
+  if (!ctx) return;
   const eps = (ctx.plays[ctx.flagIdx] || {}).episodes || [];
   if (i < 0 || i >= eps.length) return;
   ctx.curEp = i;
+  ctx._pendingSeek = 0; // 手动切换新集数时从 0 秒起播
+  ctx._curTime = 0;
+  saveVodProgress(ctx, 0, 0, true);
   renderEpStrip();
   await playCurrent();
 }
@@ -291,12 +417,11 @@ async function playCurrent(resume) {
   const title = `${ctx.vodName} · ${ep.name || '第' + (ctx.curEp + 1) + '集'}`;
   document.getElementById('player-title').textContent = title;
 
-  // 是否为当前线路最后一集（或单集）：用于「末集停在末帧」判定
   const eps = (flag.episodes || []);
   ctx.isLastEp = ctx.curEp >= eps.length - 1;
-  lastFramePaused = false; // 新的一集重新开始计时
+  lastFramePaused = false;
 
-  // WebDAV / 直链播放：跳过 /api/sites 解析，直接使用已提供的真实地址
+  // WebDAV / 直链播放
   if (ctx.directPlay) {
     const epUrl = ep.url || ep.id || '';
     if (!epUrl) { showToast('未获取到播放地址'); return; }
@@ -323,9 +448,7 @@ async function playCurrent(resume) {
     return;
   }
 
-  // 记录原始源站 URL（未代理包装），用于代理失败时的直连回退
   ctx.rawUrl = res.url || ep.url || ep.id || '';
-  // 每次重新解析选集时重置回退状态，优先尝试代理
   ctx._fallback = false;
   ctx._fallbackTried = false;
   ctx.lastUrl = ctx.rawUrl;
@@ -344,13 +467,16 @@ async function playCurrent(resume) {
     qBtn.style.display = 'none';
   }
 
-  // 用解析出的地址启动 tesla-media-hub 内置播放库解码
   await applyMode();
 }
 
 async function cycleQuality() {
   const ctx = playCtx;
   if (!ctx.urls || ctx.urls.length < 2) return;
+  // 切换清晰度时保留当前已播放的秒数
+  if (ctx._curTime > 5) {
+    ctx._pendingSeek = ctx._curTime;
+  }
   ctx.qualityIdx = (ctx.qualityIdx + 1) % ctx.urls.length;
   const q = ctx.urls[ctx.qualityIdx];
   document.getElementById('btn-quality').textContent = q.label;
@@ -358,19 +484,22 @@ async function cycleQuality() {
   ctx.lastUrl = q.url;
   ctx._fallback = false;
   ctx._fallbackTried = false;
-  await applyMode(); // 重建播放实例以装载新清晰度
+  await applyMode();
   showToast('已切换：' + q.label);
 }
 
 function closePlayer() {
-  // 所有清理均 try/catch，确保最终必能关闭播放层返回页面
+  // 关闭播放器前强制保存最后一刻的观看进度
+  if (playCtx && playCtx._curTime > 5) {
+    saveVodProgress(playCtx, playCtx._curTime, playCtx._duration, true);
+  }
+
   if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
   if (iptvPlayer) {
     try { iptvPlayer.destroy(); } catch (e) { /* ignore */ }
     iptvPlayer = null;
   }
 
-  // 清理播放器容器内的 canvas/控件，保留 view 容器（drive-view/iptv-view），避免下次打开叠加
   try {
     const driveHost = document.getElementById('tesla-host');
     const iptvHost = document.getElementById('iptv-host');
@@ -380,7 +509,6 @@ function closePlayer() {
     document.getElementById('iptv-view').classList.add('hidden');
   } catch (e) { /* ignore */ }
 
-  // 清空选集条，释放 DOM 与播放缓存
   try { document.getElementById('ep-strip').innerHTML = ''; } catch (e) { /* ignore */ }
 
   playCtx = null;
@@ -388,7 +516,28 @@ function closePlayer() {
   playerLayer.classList.add('hidden');
 }
 
-// WebDAV / 直链播放入口：streamUrl 为真实源站地址（未代理），由 applyMode 统一走 /api/stream 代理 + 回退直连
+// 一键接续最近一次观看的剧集/电影（供顶栏按钮或首页卡片调用）
+function resumeLastWatch(index = 0) {
+  const list = getAllVodHistory();
+  const item = list[index];
+  if (!item || !item.plays || !item.plays.length) {
+    showToast('暂无历史观看记录');
+    return;
+  }
+  openPlayer({
+    siteKey: item.siteKey,
+    vodId: item.vodId,
+    vodName: item.vodName,
+    poster: item.poster,
+    plays: item.plays,
+    flagIdx: item.flagIdx || 0,
+    startEp: item.curEp || 0,
+    resumeTime: item.time || 0,
+    directPlay: !!item.directPlay,
+  });
+}
+
+// WebDAV / 直链播放入口
 function playWebdav(streamUrl, name) {
   openPlayer({
     vodName: name || 'WebDAV',
@@ -401,8 +550,10 @@ function playWebdav(streamUrl, name) {
 }
 window.playWebdav = playWebdav;
 
-// 暴露给 app.js 使用
+// 暴露给 app.js 与页面按钮使用
 window.openPlayer = openPlayer;
 window.switchEp = switchEp;
 window.cycleQuality = cycleQuality;
 window.closePlayer = closePlayer;
+window.resumeLastWatch = resumeLastWatch;
+window.getAllVodHistory = getAllVodHistory;
