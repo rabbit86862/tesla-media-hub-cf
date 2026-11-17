@@ -1,5 +1,5 @@
 /**
- * 主应用：hash 路由 + 页面渲染（源 → 站点 → 内容 → 详情 → 播放）
+ * 主应用：hash 路由 + 页面渲染（源 → 站点 → 内容 → 详情 → 播放 + 断点续播）
  */
 
 const app = document.getElementById('app');
@@ -28,6 +28,50 @@ function closeModal() {
   document.getElementById('modal').classList.add('hidden');
 }
 window.closeModal = closeModal;
+
+function fmtSec(sec) {
+  const s = Math.max(0, Math.floor(sec || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+}
+
+function clearVodHistory() {
+  try { localStorage.removeItem('tesla_vod_history_v1'); } catch (_) { /* ignore */ }
+  showToast('已清空观看记录');
+  renderHome();
+}
+window.clearVodHistory = clearVodHistory;
+
+function renderContinueWatchingSection() {
+  if (typeof window.getAllVodHistory !== 'function') return '';
+  const list = window.getAllVodHistory();
+  if (!list.length) return '';
+
+  const cards = list.slice(0, 6).map((item, idx) => {
+    const timeText = item.time > 5 ? ` · ${fmtSec(item.time)}` : ' · 即将开始';
+    const tagText = item.directPlay ? 'WebDAV' : '点播';
+    return `
+      <div class="card source-card" style="border-color:rgba(63,185,80,0.45);cursor:pointer;" onclick="resumeLastWatch(${idx})">
+        <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(item.vodName)}</span>
+          <span style="font-size:11px;padding:2px 6px;border-radius:4px;background:rgba(63,185,80,0.15);color:#3fb950;flex-shrink:0;">${tagText}</span>
+        </div>
+        <div class="card-meta" style="color:#58a6ff;">▶ 续播：${esc(item.epName || '第1集')}${timeText}</div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <div class="page-title" style="margin:0;">🕒 继续观看</div>
+      <button class="btn" style="min-height:32px;padding:0 10px;font-size:12px;opacity:0.75;" onclick="clearVodHistory()">清空记录</button>
+    </div>
+    <div class="card-grid" style="margin-bottom:20px;">
+      ${cards}
+    </div>`;
+}
 
 // ---------- 路由 ----------
 const navStack = [];
@@ -68,11 +112,13 @@ async function render() {
 }
 window.addEventListener('hashchange', render);
 
-// ---------- 首页：数据源列表（仅切换用，管理在 /admin） ----------
+// ---------- 首页：继续观看 + 数据源列表 ----------
 async function renderHome() {
   setTitle('车载影视', '选择数据源');
   const data = await api('/api/sources');
   const list = data.list || [];
+  const continueHtml = renderContinueWatchingSection();
+
   const sourceCards = list.length
     ? list.map((s) => `
         <div class="card source-card" onclick="enterSource('${s.id}','${esc(s.type)}')">
@@ -92,6 +138,7 @@ async function renderHome() {
       </div>
     </div>`;
   app.innerHTML = `
+    ${continueHtml}
     <div class="page-title">选择数据源</div>
     <div class="card-grid">
       ${sourceCards}
@@ -156,7 +203,6 @@ function channelCardHtml(c) {
 function playIptvChannel(sourceId, channelId) {
   const ch = iptvState.channels.find((c) => String(c.id) === String(channelId));
   if (!ch) return showToast('频道不存在');
-  // IPTV 流默认需管理员 token（服务端 IPTV_AUTH=true）；从本地存储取，与管理后台同源共享
   let token = '';
   try { token = localStorage.getItem('media_hub_admin_token') || ''; } catch (_) { /* ignore */ }
   const streamUrl =
@@ -182,7 +228,6 @@ async function enterSourceBrowse(sourceId) {
 window.enterSourceBrowse = enterSourceBrowse;
 
 function enterSite(encodedKey) {
-  // 调用方已 encodeURIComponent，这里不再二次编码（避免 :: 被双重编码导致服务端解析失败）
   go(`/browse/${encodedKey}`);
 }
 window.enterSite = enterSite;
@@ -199,7 +244,6 @@ async function renderBrowse(siteKey) {
   setTitle('加载中…', '');
   app.innerHTML = '<div class="loading">加载中…</div>';
 
-  // 并行加载：首页内容 + 当前源下全部站点（用于"切换站点"）
   const idx = siteKey.indexOf('::');
   const sourceId = idx < 0 ? siteKey : siteKey.slice(0, idx);
   const [home, sitesRes] = await Promise.all([
@@ -346,10 +390,24 @@ async function renderDetail(siteKey, vodId) {
   const data = await api(`/api/sites/${encodeURIComponent(siteKey)}/detail?id=${encodeURIComponent(vodId)}`);
   detailState.data = data;
   detailState.plays = data.plays || [];
-  const firstWithEp = detailState.plays.findIndex((p) => p.episodes && p.episodes.length);
-  detailState.flagIdx = firstWithEp >= 0 ? firstWithEp : 0;
+
+  // 若存在历史记录，优先定位到上次观看的播放线路
+  const saved = findDetailHistory();
+  if (saved && detailState.plays[saved.flagIdx]) {
+    detailState.flagIdx = saved.flagIdx;
+  } else {
+    const firstWithEp = detailState.plays.findIndex((p) => p.episodes && p.episodes.length);
+    detailState.flagIdx = firstWithEp >= 0 ? firstWithEp : 0;
+  }
+
   setTitle(data.vod_name || '', data.type_name || '');
   renderDetailContent();
+}
+
+function findDetailHistory() {
+  if (typeof window.getAllVodHistory !== 'function') return null;
+  const targetKey = (detailState.siteKey || 'default') + '::' + (detailState.vodId || (detailState.data || {}).vod_name || '');
+  return window.getAllVodHistory().find((item) => item.key === targetKey) || null;
 }
 
 function renderDetailContent() {
@@ -359,6 +417,15 @@ function renderDetailContent() {
   const flag = plays[flagIdx] || {};
   const eps = flag.episodes || [];
   const pic = data.vod_pic ? `/api/proxy/image?url=${encodeURIComponent(data.vod_pic)}` : '';
+
+  const saved = findDetailHistory();
+  const hasResume = saved && (saved.curEp > 0 || saved.time > 5);
+  const resumeBtnHtml = hasResume ? `
+    <div style="margin:12px 0;">
+      <button class="btn primary" style="width:100%;min-height:46px;font-size:15px;font-weight:700;background:#238636;border-color:#2ea043;" onclick="resumeDetailVod()">
+        ▶ 继续观看：${esc(saved.epName || '第' + (saved.curEp + 1) + '集')}${saved.time > 5 ? '（' + fmtSec(saved.time) + '）' : ''}
+      </button>
+    </div>` : '';
 
   const infoLines = [];
   if (data.vod_score) infoLines.push(`评分 ${esc(data.vod_score)}`);
@@ -376,6 +443,7 @@ function renderDetailContent() {
         <div class="d-line">主演：${esc(data.vod_actor || '-')}</div>
       </div>
     </div>
+    ${resumeBtnHtml}
     <div class="detail-desc">${esc(data.vod_content || '暂无简介')}</div>
     ${plays.length > 1 ? `
       <div class="section-title">播放线路</div>
@@ -384,10 +452,30 @@ function renderDetailContent() {
       </div>` : ''}
     <div class="section-title">选集（共 ${eps.length} 集）</div>
     <div class="ep-grid">
-      ${eps.length ? eps.map((e, i) => `<button class="ep" onclick="playNow(${i})">${esc(e.name || '第' + (i + 1) + '集')}</button>`).join('') : '<div class="empty">暂无选集（该站点可能需要特殊解析，无法直接播放）</div>'}
+      ${eps.length ? eps.map((e, i) => {
+        const isLastEp = saved && saved.flagIdx === flagIdx && saved.curEp === i;
+        const style = isLastEp ? 'border-color:#3fb950;color:#3fb950;font-weight:700;' : '';
+        return `<button class="ep" style="${style}" onclick="playNow(${i})">${esc(e.name || '第' + (i + 1) + '集')}${isLastEp ? ' · 上次' : ''}</button>`;
+      }).join('') : '<div class="empty">暂无选集（该站点可能需要特殊解析，无法直接播放）</div>'}
     </div>
     <div style="height:20px"></div>`;
 }
+
+function resumeDetailVod() {
+  const saved = findDetailHistory();
+  if (!saved) return playNow(0);
+  openPlayer({
+    siteKey: detailState.siteKey,
+    vodId: detailState.vodId,
+    vodName: (detailState.data || {}).vod_name || '',
+    poster: (detailState.data || {}).vod_pic || '',
+    plays: detailState.plays,
+    flagIdx: saved.flagIdx || detailState.flagIdx,
+    startEp: saved.curEp || 0,
+    resumeTime: saved.time || 0,
+  });
+}
+window.resumeDetailVod = resumeDetailVod;
 
 function switchDetailFlag(i) {
   detailState.flagIdx = i;
@@ -398,6 +486,7 @@ window.switchDetailFlag = switchDetailFlag;
 function playNow(epIdx) {
   openPlayer({
     siteKey: detailState.siteKey,
+    vodId: detailState.vodId,
     vodName: (detailState.data || {}).vod_name || '',
     poster: (detailState.data || {}).vod_pic || '',
     plays: detailState.plays,
