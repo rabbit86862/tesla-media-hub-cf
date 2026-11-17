@@ -17,7 +17,7 @@
       background: #0f1115;
     }
 
-    /* 顶部栏右侧全屏工具组 */
+    /* 顶部栏右侧工具组 */
     #topbar {
       display: flex;
       align-items: center;
@@ -51,11 +51,6 @@
     .fs-btn:active {
       background: #2b3342;
       border-color: #3e88f7;
-    }
-    .fs-btn-theater {
-      background: rgba(62, 136, 247, 0.15);
-      color: #58a6ff;
-      border-color: rgba(62, 136, 247, 0.4);
     }
 
     /* 强制全屏状态下的视口锁定，消除黑边与溢出 */
@@ -91,7 +86,6 @@
     <div class="fs-actions">
       <button class="fs-btn" onclick="resumeLastWatch(0)" style="border-color:#3fb950;color:#3fb950;">🕒 继续观看</button>
       <button class="fs-btn" onclick="openTvModal()" style="border-color:#00b4d8;color:#00b4d8;">📺 电视直播</button>
-      <button class="fs-btn fs-btn-theater" onclick="launchTeslaTheater()" title="P档下彻底隐藏顶部地址栏">剧场无边框</button>
       <button id="btn-web-fs" class="fs-btn" onclick="toggleWebFullscreen()">⛶ 全屏</button>
     </div>
   </header>
@@ -153,32 +147,7 @@
       }
     }
 
-    // 2. 国产版车机剧场无边框引导（自动复制网址 + 提示从剧场 B 站进入）
-    function launchTeslaTheater() {
-      const url = window.location.origin + '/';
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).catch(() => {});
-      }
-      if (typeof showModal === 'function') {
-        showModal(`
-          <div class="modal-body" style="max-width:480px;">
-            <h3 style="margin-top:0;">🎬 如何开启行驶无边框全屏？</h3>
-            <p style="line-height:1.7;color:#c9d1d9;font-size:14px;">
-              国产版车机普通浏览器无法隐藏地址栏，请按以下 2 步进入原生剧场容器（网址已自动复制）：<br>
-              1. <b>P 档</b>下打开车机底部 <b>「剧场 → 哔哩哔哩」</b>；<br>
-              2. 在消息/私信或仅自己可见的动态中点击：<br>
-              <code style="display:block;margin:8px 0;padding:8px;background:#161b22;border-radius:6px;color:#58a6ff;word-break:break-all;">${url}</code>
-              进入后顶部地址栏将彻底消失，直接挂 <b>D 档</b> 行驶即可保持。
-            </p>
-            <div class="modal-actions">
-              <button class="btn primary" onclick="closeModal()">知道了</button>
-            </div>
-          </div>
-        `);
-      }
-    }
-
-    // 3. 关闭播放器（同步刷新首页续播卡片）
+    // 2. 关闭播放器（同步刷新首页续播卡片）
     function exitAndClosePlayer() {
       if (typeof closePlayer === 'function') {
         closePlayer();
@@ -235,7 +204,7 @@
         </div>
       </div>
 
-      <!-- 订阅源触屏切换按钮（替代车机弹窗中无法点按的 select 下拉框） -->
+      <!-- 订阅源触屏切换按钮 -->
       <div id="tv-source-bar" class="tab-bar" style="padding:4px 0;"></div>
 
       <!-- 频道搜索框 -->
