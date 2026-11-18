@@ -222,14 +222,20 @@
   </div>
 
   <script>
-    // 已验证可用的 HTTPS 自动更新订阅源
+    // 已验证可用的 HTTPS 自动更新订阅源（支持单链接 url 与多链接合并 urls）
     const TV_SOURCES = [
       { name: '源1：Guovin 综合', url: 'https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/result.m3u' },
       { name: '源2：APTV 精品', url: 'https://testingcf.jsdelivr.net/gh/Kimentanm/aptv@master/m3u/iptv.m3u' },
       { name: '源3：ZBDS 加速源', url: 'https://live.zbds.top/tv/iptv4.m3u' },
       { name: '源4：ChinaIPTV', url: 'https://testingcf.jsdelivr.net/gh/hujingguang/ChinaIPTV@main/cnTV_AutoUpdate.m3u8' },
-      { name: '源5：Free-TV 全球', url: 'https://testingcf.jsdelivr.net/gh/Free-TV/IPTV@master/playlist.m3u8' },
-      { name: '源6：Free-TV 港澳台', url: 'https://testingcf.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_hong_kong.m3u8' }
+      {
+        name: '源5：Free-TV 两岸三地',
+        urls: [
+          { url: 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_china.m3u8', group: '中国大陆', useProxy: true },
+          { url: 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_hong_kong.m3u8', group: '中国香港', useProxy: true },
+          { url: 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_taiwan.m3u8', group: '中国台湾', useProxy: true }
+        ]
+      }
     ];
 
     let currentSourceIdx = 0;
@@ -267,10 +273,42 @@
       document.getElementById('tv-modal').classList.add('hidden');
     }
 
+    // 带 6 秒超时熔断的拉取函数（支持走同源 /api/stream 代理直连 GitHub）
+    async function fetchSingleM3uText(m3uUrl, forceRefresh, useProxy = false) {
+      const fetchWithTimeout = async (targetUrl) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 6000);
+        try {
+          const res = await fetch(targetUrl, {
+            cache: forceRefresh ? 'no-cache' : 'default',
+            signal: controller.signal
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return await res.text();
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+
+      if (useProxy) {
+        return await fetchWithTimeout('/api/stream?url=' + encodeURIComponent(m3uUrl));
+      }
+
+      try {
+        return await fetchWithTimeout(m3uUrl);
+      } catch (e) {
+        if (m3uUrl.includes('testingcf.jsdelivr.net')) {
+          const backupUrl = m3uUrl.replace('testingcf.jsdelivr.net', 'fastly.jsdelivr.net');
+          return await fetchWithTimeout(backupUrl);
+        }
+        throw e;
+      }
+    }
+
     async function loadTvChannels(forceRefresh) {
       const statusEl = document.getElementById('tv-status');
       const gridEl = document.getElementById('tv-channel-grid');
-      const m3uUrl = (TV_SOURCES[currentSourceIdx] || TV_SOURCES[0]).url;
+      const currentSrc = TV_SOURCES[currentSourceIdx] || TV_SOURCES[0];
 
       if (forceRefresh) {
         allTvChannels = [];
@@ -280,17 +318,35 @@
       statusEl.textContent = '正在同步最新 HTTPS 频道列表…';
 
       try {
-        let res = await fetch(m3uUrl, { cache: forceRefresh ? 'no-cache' : 'default' });
-        if (!res.ok && m3uUrl.includes('testingcf.jsdelivr.net')) {
-          const backupUrl = m3uUrl.replace('testingcf.jsdelivr.net', 'fastly.jsdelivr.net');
-          res = await fetch(backupUrl, { cache: 'no-cache' });
-        }
-        if (!res.ok) {
-          throw new Error(`源站返回 HTTP ${res.status}，请点击上方切换其他源`);
+        const tasks = Array.isArray(currentSrc.urls)
+          ? currentSrc.urls.map(item => (typeof item === 'string' ? { url: item, group: '', useProxy: false } : item))
+          : [{ url: currentSrc.url, group: '', useProxy: !!currentSrc.useProxy }];
+
+        const results = await Promise.allSettled(
+          tasks.map(async (t) => {
+            let text = await fetchSingleM3uText(t.url, forceRefresh, t.useProxy);
+            if (t.group) {
+              text = text.replace(/^#EXTINF:([^\r\n,]*)/gm, (match, attrs) => {
+                if (/group-title="[^"]*"/i.test(attrs)) {
+                  return '#EXTINF:' + attrs.replace(/group-title="[^"]*"/i, `group-title="${t.group}"`);
+                }
+                return `#EXTINF:${attrs} group-title="${t.group}"`;
+              });
+            }
+            return text;
+          })
+        );
+
+        const mergedText = results
+          .filter(r => r.status === 'fulfilled' && r.value)
+          .map(r => r.value)
+          .join('\n');
+
+        if (!mergedText.trim()) {
+          throw new Error('源站响应超时，请点击上方切换其他源');
         }
 
-        const m3uText = await res.text();
-        allTvChannels = parseAndGroupM3u(m3uText);
+        allTvChannels = parseAndGroupM3u(mergedText);
 
         if (allTvChannels.length === 0) {
           statusEl.textContent = '当前源暂无可用的 HTTPS 频道，请点击上方切换其他源';
