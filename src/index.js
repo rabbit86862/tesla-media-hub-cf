@@ -167,7 +167,7 @@ async function routeApi(request, url) {
   }
 
   // /api/stream?url=...  流媒体代理（绕过源站防盗链/跨域，详见 lib/streamProxy.js）
-  if (p === '/api/stream' && method === 'GET') {
+  if (p === '/api/stream' && (method === 'GET' || method === 'HEAD' || method === 'OPTIONS')) {
     // 合并 KV 中的 WebDAV 配置（优先于 wrangler 变量），供代理注入 Basic Auth
     const wdEnv = await store.getWebdavConfig();
     return await handleStream(request, url, { ...env, ...wdEnv });
