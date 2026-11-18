@@ -3,7 +3,7 @@
  * 统一播放引擎（tesla-media-hub 内置播放库，基于 wody11/Tesla-VideoPlayer）：
  *   - 完全无 <video> 标签，纯 WebCodecs 解码 → Canvas 渲染
  *   - AppleCMS 点播：浏览器直连源站 HLS/MP4（不走服务端，零服务器负载）
- *   - IPTV 直播：直连优先 + 8 秒首帧超时自动回退代理与多线路切换
+ *   - IPTV 直播：直连优先 + 5 秒首帧超时自动回退代理与多线路切换 + YouTube 官方嵌入
  *   - 源站不支持 WebCodecs 或跨域受限时给出提示
  */
 
@@ -188,7 +188,7 @@ async function openPlayer(ctx) {
 }
 
 /**
- * 打开 IPTV 频道播放（支持自动全屏 + 直连优先 + 8 秒首帧超时熔断 + 多线路自动容错切换）
+ * 打开 IPTV 频道播放（支持普通流 WebCodecs 解码 + youtube:// 官方直播嵌入）
  */
 async function openIptvPlayer(ctx, isFallback = false) {
   const mySession = ++iptvSessionId;
@@ -224,9 +224,37 @@ async function openIptvPlayer(ctx, isFallback = false) {
   playerLayer.classList.remove('hidden');
   driveView.classList.add('hidden');
   iptvView.classList.remove('hidden');
-  if (host) host.innerHTML = ''; // 清理上一台残留画面
+  if (host) host.innerHTML = ''; // 清理上一台残留画面或 iframe
 
   if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
+
+  // ==================== YouTube 官方直播嵌入模式 ====================
+  if (/^youtube:\/\//i.test(ctx.streamUrl)) {
+    const rawId = ctx.streamUrl.replace(/^youtube:\/\//i, '').trim();
+    // 支持频道 ID（自动追踪该频道当前 24h 直播）或指定视频 ID（video:xxx）
+    const embedSrc = rawId.startsWith('video:')
+      ? `https://www.youtube.com/embed/${encodeURIComponent(rawId.slice(6))}?autoplay=1&playsinline=1&rel=0`
+      : `https://www.youtube.com/embed/live_stream?channel=${encodeURIComponent(rawId)}&autoplay=1&playsinline=1&rel=0`;
+
+    showToast('正在连接 YouTube 直播：' + (ctx.name || '频道'));
+
+    const iframe = document.createElement('iframe');
+    iframe.src = embedSrc;
+    iframe.style.cssText = 'width:100%;height:100%;border:0;display:block;background:#000;';
+    iframe.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
+    iframe.allowFullscreen = true;
+    iframe.referrerPolicy = 'strict-origin-when-cross-origin';
+    iframe.onload = () => {
+      if (mySession !== iptvSessionId) return;
+      const t = document.getElementById('toast');
+      if (t) t.classList.remove('show');
+    };
+
+    if (host) host.appendChild(iframe);
+    if (typeof ctx.onSuccess === 'function') ctx.onSuccess();
+    return;
+  }
+  // ===============================================================
 
   if (!window.IptvAdapter || !window.IptvAdapter.isSupported()) {
     showToast('当前浏览器不支持 WebCodecs');
@@ -237,7 +265,7 @@ async function openIptvPlayer(ctx, isFallback = false) {
   const playUrl = (isFallback || isHttp) ? proxyUrl(ctx.streamUrl) : ctx.streamUrl;
   showToast('正在加载 ' + (ctx.name || '频道'));
 
-  // 8 秒首帧超时熔断：防止海外直播源丢包导致无限转圈
+  // 5 秒首帧超时熔断：防止失效直播源无限转圈
   let settled = false;
   const triggerIptvFallbackOrNext = (reasonMsg) => {
     if (settled || mySession !== iptvSessionId) return;
@@ -261,7 +289,7 @@ async function openIptvPlayer(ctx, isFallback = false) {
 
   startupTimer = setTimeout(() => {
     triggerIptvFallbackOrNext('连接超时');
-  }, 8000);
+  }, 5000);
 
   try {
     const player = await window.IptvAdapter.createPlayer(host, playUrl, {
@@ -270,6 +298,7 @@ async function openIptvPlayer(ctx, isFallback = false) {
         if (settled || mySession !== iptvSessionId) return;
         settled = true;
         if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
+        if (typeof ctx.onSuccess === 'function') ctx.onSuccess();
         const t = document.getElementById('toast');
         if (t) t.classList.remove('show');
       },
