@@ -113,7 +113,7 @@
         <div id="drive-view" class="drive-view hidden">
           <div id="tesla-host"></div>
         </div>
-        <!-- IPTV：WebCodecs 直播解码 -->
+        <!-- IPTV：WebCodecs 直播解码 & YouTube 官方直播嵌入 -->
         <div id="iptv-view" class="drive-view hidden">
           <div id="iptv-host"></div>
         </div>
@@ -193,11 +193,11 @@
     });
   </script>
 
-  <!-- 电视直播频道弹窗（触屏直选源 + 自动过滤 HTTPS + 多线路容错） -->
+  <!-- 电视直播频道弹窗（触屏直选源 + 多线路容错 + YouTube 新闻直播） -->
   <div id="tv-modal" class="modal hidden" onclick="if(event.target===this)closeTvModal()">
     <div class="modal-body" style="max-width:760px;">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
-        <h3 style="margin:0;">📺 电视直播（HTTPS 直连）</h3>
+        <h3 style="margin:0;">📺 电视直播</h3>
         <div style="display:flex;gap:8px;align-items:center;">
           <button class="quality-btn" style="min-height:38px;" onclick="loadTvChannels(true)">🔄 刷新</button>
           <button class="player-close" style="min-height:38px;" onclick="closeTvModal()">✕</button>
@@ -209,7 +209,7 @@
 
       <!-- 频道搜索框 -->
       <div class="search-row" style="margin-bottom:4px;">
-        <input id="tv-search-input" type="text" placeholder="搜索频道（如：CCTV、卫视、凤凰、中天、TVBS…）" oninput="renderTvChannels()">
+        <input id="tv-search-input" type="text" placeholder="搜索频道（如：CCTV、卫视、TVBS、中天、TVB、Bloomberg…）" oninput="renderTvChannels()">
       </div>
 
       <!-- 分组标签栏 -->
@@ -222,12 +222,38 @@
   </div>
 
   <script>
-    // 已验证可用的 HTTPS 自动更新订阅源（支持单链接 url 与多镜像并发竞速 urls）
+    // 自动更新订阅源（支持内置 YouTube 频道列表 channels、单链接 url 与多镜像并发竞速 mirrors）
     const TV_SOURCES = [
+      {
+        name: 'YouTube 新闻',
+        channels: [
+          // 台湾新闻台
+          { name: 'TVBS 新闻台', group: '台湾新闻', url: 'youtube://UC5nwNW4KdC0SzrhF9BXEYOQ' },
+          { name: '中天新闻台', group: '台湾新闻', url: 'youtube://UCpu3bemTQwAU8PqM4kJdoEQ' },
+          { name: '三立 LIVE 新闻', group: '台湾新闻', url: 'youtube://UC2TuODJhC03pLgd6UuWP0Tg' },
+          { name: '东森新闻台', group: '台湾新闻', url: 'youtube://UCR3asjvr_WAaxwJYEDV_Bfw' },
+          { name: '民视新闻台', group: '台湾新闻', url: 'youtube://UClIfLEkdLvffHm-EJ7gNdXQ' },
+          { name: '台视新闻台', group: '台湾新闻', url: 'youtube://UCzZe-zMu-YgVFQfDmsFG_VQ' },
+          { name: '华视新闻台', group: '台湾新闻', url: 'youtube://UCDCJyLpbfgeVE9iZiEam-Kg' },
+          { name: '公视新闻网', group: '台湾新闻', url: 'youtube://UCexpzYDEnfmAvPSfG4xbcjA' },
+          // 香港新闻台
+          { name: 'TVB 无綫新闻', group: '香港新闻', url: 'youtube://UC_ifDT46GFQWAuJBnijGUdg' },
+          { name: '凤凰卫视资讯', group: '香港新闻', url: 'youtube://UCa6_28_51-7_7f9-5q2kQ4w' },
+          // 国际新闻台
+          { name: 'CNA 亚洲新闻台', group: '国际新闻', url: 'youtube://UC83jt4dlz1Gjl58fzQrrKZg' },
+          { name: 'Bloomberg 彭博财经', group: '国际新闻', url: 'youtube://UCIALMKvObZNtJ6AmdCLP7Lg' },
+          { name: 'Sky News 英国天空', group: '国际新闻', url: 'youtube://UCoMdktPbSTixAyNGwb-UYkQ' },
+          { name: 'Al Jazeera 半岛英语', group: '国际新闻', url: 'youtube://UCNye-wNBqNL5ZzHSJj3l8Bg' },
+          { name: 'DW News 德国之声', group: '国际新闻', url: 'youtube://UCknLrEdhRCp1aegoMqRaCZg' },
+          { name: 'France 24 英语', group: '国际新闻', url: 'youtube://UCQfwfsi5VrQ8yKZ-UWmAEFg' },
+          { name: 'ABC News 澳洲新闻', group: '国际新闻', url: 'youtube://UCVgO39Bk5sMo66-6o6Spn6Q' },
+          { name: 'CGTN 国际频道', group: '国际新闻', url: 'youtube://UCgrNz-aDmcr2uuto8_DL2jg' }
+        ]
+      },
       { name: 'Guovin 综合', url: 'https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/result.m3u' },
+      { name: 'YanG 央视卫视', url: 'https://testingcf.jsdelivr.net/gh/YanG-1989/m3u@main/Gather.m3u' },
       { name: 'APTV 精品', url: 'https://testingcf.jsdelivr.net/gh/Kimentanm/aptv@master/m3u/iptv.m3u' },
       { name: 'ZBDS 加速', url: 'https://live.zbds.top/tv/iptv4.m3u' },
-      { name: 'ChinaIPTV', url: 'https://testingcf.jsdelivr.net/gh/hujingguang/ChinaIPTV@main/cnTV_AutoUpdate.m3u8' },
       {
         name: 'Free-TV 两岸三地',
         urls: [
@@ -306,7 +332,6 @@
           });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const text = await res.text();
-          // 校验返回内容确实是有效的播放列表而非错误网页
           if (!text || (!text.includes('#EXTINF') && !text.includes('http'))) {
             throw new Error('无效列表内容');
           }
@@ -331,11 +356,25 @@
         allTvChannels = [];
         gridEl.innerHTML = '';
       }
+
+      // 1. 内置 YouTube 频道列表直接秒加载
+      if (Array.isArray(currentSrc.channels)) {
+        allTvChannels = currentSrc.channels.map(c => ({
+          name: c.name,
+          group: c.group || 'YouTube 直播',
+          urls: Array.isArray(c.urls) ? c.urls : [c.url]
+        }));
+        statusEl.style.display = 'none';
+        renderTvGroups();
+        renderTvChannels();
+        return;
+      }
+
+      // 2. 外部 M3U 订阅源拉取
       statusEl.style.display = 'block';
-      statusEl.textContent = '正在同步最新 HTTPS 频道列表…';
+      statusEl.textContent = '正在同步最新频道列表…';
 
       try {
-        // 归一化任务：兼容单链接 url 与多镜像数组 mirrors
         const tasks = Array.isArray(currentSrc.urls)
           ? currentSrc.urls.map(item => ({
               mirrors: item.mirrors || [item.url],
@@ -379,7 +418,7 @@
         allTvChannels = parseAndGroupM3u(mergedText);
 
         if (allTvChannels.length === 0) {
-          statusEl.textContent = '当前源暂无可用的 HTTPS 频道，请点击上方切换其他源';
+          statusEl.textContent = '当前源暂无可用频道，请点击上方切换其他源';
           return;
         }
 
@@ -391,7 +430,7 @@
       }
     }
 
-    // 兼容解析标准 M3U (#EXTINF) 与 TVBox TXT (#genre#) 双格式，自动筛选 https:// 直连源
+    // 兼容解析标准 M3U (#EXTINF) 与 TVBox TXT (#genre#) 双格式，同时支持 https/http/youtube 协议
     function parseAndGroupM3u(text) {
       const lines = text.split(/\r?\n/);
       const channelMap = new Map();
@@ -399,7 +438,10 @@
       let currentTxtGroup = '精选频道';
 
       const addChannelUrl = (name, group, url) => {
-        if (!/^https:\/\//i.test(url)) return;
+        if (!/^(https?|youtube):\/\//i.test(url)) return;
+        // 过滤车机 WebCodecs 无法硬解的 H.265 / 4K 死链
+        if (/hevc|h265|265|4k/i.test(name + ' ' + url)) return;
+
         const cleanName = name.trim() || '未知频道';
         const cleanGroup = group.trim() || '精选频道';
         if (!channelMap.has(cleanName)) {
@@ -407,7 +449,11 @@
         }
         const item = channelMap.get(cleanName);
         if (!item.urls.includes(url)) {
-          item.urls.push(url);
+          if (/^(https|youtube):\/\//i.test(url)) {
+            item.urls.unshift(url);
+          } else {
+            item.urls.push(url);
+          }
         }
       };
 
@@ -426,7 +472,7 @@
           currentMeta = null;
         } else if (line.includes('#genre#')) {
           currentTxtGroup = line.split(',')[0].trim() || '精选频道';
-        } else if (!line.startsWith('#') && line.includes(',http')) {
+        } else if (!line.startsWith('#') && (line.includes(',http') || line.includes(',youtube://'))) {
           const commaIdx = line.indexOf(',');
           const name = line.slice(0, commaIdx).trim();
           const url = line.slice(commaIdx + 1).trim();
@@ -481,13 +527,37 @@
       }).join('');
     }
 
+    // 记录每个频道上次成功播放的 URL，下次点开优先使用
+    const TV_GOOD_URL_KEY = 'tesla_tv_good_urls_v1';
+    function getSavedGoodUrl(channelName) {
+      try {
+        const map = JSON.parse(localStorage.getItem(TV_GOOD_URL_KEY) || '{}');
+        return map[channelName] || '';
+      } catch (_) { return ''; }
+    }
+    function saveGoodUrl(channelName, url) {
+      try {
+        const map = JSON.parse(localStorage.getItem(TV_GOOD_URL_KEY) || '{}');
+        map[channelName] = url;
+        localStorage.setItem(TV_GOOD_URL_KEY, JSON.stringify(map));
+      } catch (_) { /* ignore */ }
+    }
+
     function startChannelWithFallback(channelName) {
       const ch = allTvChannels.find(c => c.name === channelName);
       if (!ch || !ch.urls.length) return;
       closeTvModal();
+
+      const goodUrl = getSavedGoodUrl(ch.name);
+      const sortedUrls = [...ch.urls];
+      if (goodUrl && sortedUrls.includes(goodUrl)) {
+        sortedUrls.splice(sortedUrls.indexOf(goodUrl), 1);
+        sortedUrls.unshift(goodUrl);
+      }
+
       currentTvQueue = {
         name: ch.name,
-        urls: ch.urls,
+        urls: sortedUrls,
         index: 0
       };
       tryPlayCurrentQueueLine();
@@ -503,6 +573,7 @@
         window.openIptvPlayer({
           name: name + titleSuffix,
           streamUrl: url,
+          onSuccess: () => saveGoodUrl(name, url),
           onAllFailed: () => {
             if (currentTvQueue && currentTvQueue.index + 1 < currentTvQueue.urls.length) {
               currentTvQueue.index++;
