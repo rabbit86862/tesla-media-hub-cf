@@ -209,7 +209,7 @@
 
       <!-- 频道搜索框 -->
       <div class="search-row" style="margin-bottom:4px;">
-        <input id="tv-search-input" type="text" placeholder="搜索频道（如：CCTV、卫视、TVBS、中天、TVB、Bloomberg…）" oninput="renderTvChannels()">
+        <input id="tv-search-input" type="text" placeholder="搜索频道（如：CCTV、卫视、4K、TVBS、中天、TVB…）" oninput="renderTvChannels()">
       </div>
 
       <!-- 分组标签栏 -->
@@ -428,7 +428,7 @@
       }
     }
 
-    // 兼容解析标准 M3U (#EXTINF) 与 TVBox TXT (#genre#) 双格式，同时支持 https/http/youtube 协议
+    // 兼容解析标准 M3U (#EXTINF) 与 TVBox TXT (#genre#) 双格式，完整保留 4K 频道并智能排序线路
     function parseAndGroupM3u(text) {
       const lines = text.split(/\r?\n/);
       const channelMap = new Map();
@@ -437,8 +437,6 @@
 
       const addChannelUrl = (name, group, url) => {
         if (!/^(https?|youtube):\/\//i.test(url)) return;
-        // 过滤车机 WebCodecs 无法硬解的 H.265 / 4K 死链
-        if (/hevc|h265|265|4k/i.test(name + ' ' + url)) return;
 
         const cleanName = name.trim() || '未知频道';
         const cleanGroup = group.trim() || '精选频道';
@@ -447,7 +445,9 @@
         }
         const item = channelMap.get(cleanName);
         if (!item.urls.includes(url)) {
-          if (/^(https|youtube):\/\//i.test(url)) {
+          const isHevcOr4k = /hevc|h265|265|4k/i.test(cleanName + ' ' + url);
+          // 优先将常规 https/youtube 线路排在最前，4K/HEVC 及 http 代理线路依次顺延
+          if (/^(https|youtube):\/\//i.test(url) && !isHevcOr4k) {
             item.urls.unshift(url);
           } else {
             item.urls.push(url);
@@ -519,7 +519,7 @@
       statusEl.style.display = 'none';
       const displayList = filtered.slice(0, 200);
       grid.innerHTML = displayList.map((ch) => {
-        const safeName = ch.name.replace(/'/g, "\\'");
+        const safeName = ch.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
         const badge = ch.urls.length > 1 ? ` (${ch.urls.length}源)` : '';
         return `<button class="ep" style="font-size:14px;font-weight:600;" onclick="startChannelWithFallback('${safeName}')">${ch.name}${badge}</button>`;
       }).join('');
