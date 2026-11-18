@@ -204,8 +204,8 @@
         </div>
       </div>
 
-      <!-- 订阅源触屏切换按钮 -->
-      <div id="tv-source-bar" class="tab-bar" style="padding:4px 0;"></div>
+      <!-- 订阅源触屏切换按钮（自动换行 + 紧凑间距，避免边缘裁切） -->
+      <div id="tv-source-bar" class="tab-bar" style="display:flex;flex-wrap:wrap;gap:6px;padding:6px 0;overflow:visible;"></div>
 
       <!-- 频道搜索框 -->
       <div class="search-row" style="margin-bottom:4px;">
@@ -224,19 +224,18 @@
   <script>
     // 已验证可用的 HTTPS 自动更新订阅源（支持单链接 url 与多镜像并发竞速 urls）
     const TV_SOURCES = [
-      { name: '源1：Guovin 综合', url: 'https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/result.m3u' },
-      { name: '源2：APTV 精品', url: 'https://testingcf.jsdelivr.net/gh/Kimentanm/aptv@master/m3u/iptv.m3u' },
-      { name: '源3：ZBDS 加速源', url: 'https://live.zbds.top/tv/iptv4.m3u' },
-      { name: '源4：ChinaIPTV', url: 'https://testingcf.jsdelivr.net/gh/hujingguang/ChinaIPTV@main/cnTV_AutoUpdate.m3u8' },
+      { name: 'Guovin 综合', url: 'https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/result.m3u' },
+      { name: 'APTV 精品', url: 'https://testingcf.jsdelivr.net/gh/Kimentanm/aptv@master/m3u/iptv.m3u' },
+      { name: 'ZBDS 加速', url: 'https://live.zbds.top/tv/iptv4.m3u' },
+      { name: 'ChinaIPTV', url: 'https://testingcf.jsdelivr.net/gh/hujingguang/ChinaIPTV@main/cnTV_AutoUpdate.m3u8' },
       {
-        name: '源5：Free-TV 两岸三地',
+        name: 'Free-TV 两岸三地',
         urls: [
           {
             group: '中国大陆',
             mirrors: [
               'https://fastly.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_china.m3u8',
               'https://gcore.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_china.m3u8',
-              'https://testingcf.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_china.m3u8',
               '/api/stream?url=' + encodeURIComponent('https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_china.m3u8')
             ]
           },
@@ -245,7 +244,6 @@
             mirrors: [
               'https://fastly.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_hong_kong.m3u8',
               'https://gcore.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_hong_kong.m3u8',
-              'https://testingcf.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_hong_kong.m3u8',
               '/api/stream?url=' + encodeURIComponent('https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_hong_kong.m3u8')
             ]
           },
@@ -254,7 +252,6 @@
             mirrors: [
               'https://fastly.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_taiwan.m3u8',
               'https://gcore.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_taiwan.m3u8',
-              'https://testingcf.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_taiwan.m3u8',
               '/api/stream?url=' + encodeURIComponent('https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_taiwan.m3u8')
             ]
           }
