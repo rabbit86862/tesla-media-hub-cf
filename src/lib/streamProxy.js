@@ -1,12 +1,10 @@
-// 流媒体代理：为 AppleCMS 点播提供「同源代理」，绕过源站防盗链(Referer/Origin 校验)与跨域限制。
-// 前端拿到的播放地址统一改写为 /api/stream?url=...，由本模块向源站拉流并：
-//   1) 注入源站自身的 Referer / Origin，使大多数防盗链放行；
-//   2) 透传 Range 头，支持 mp4 拖拽；
-//   3) 若为 m3u8，递归将其内部的 ts / key / map 地址改写为同样走代理的绝对地址。
+// 流媒体代理：同时兼容 AppleCMS 点播、IPTV 直播与 WebDAV 私有存储
+//   1) 保留 WebDAV Basic Auth 自动鉴权；
+//   2) 双模式请求头自适应（优先浏览器头，遇 403/401/412 自动切换 okhttp 播放器头并剥离 Origin 重试）；
+//   3) 增强 M3U8 识别（支持无 .m3u8 后缀、Content-Type 为 text/plain 的直播源内容嗅探与切片重写）。
 
 import { fetchStream } from './fetcher.js';
 
-// SSRF 基本防护：拦截明显的内网/元数据地址（CF 运行时本身也会拒绝 RFC1918 私有地址）
 const BLOCKED_KEYWORDS = ['localhost', 'internal', 'metadata', '169.254.169.254'];
 
 function isBlockedHost(host) {
@@ -51,7 +49,6 @@ function rewriteM3u8(text, baseUrl, proxyBase) {
       out.push(line);
       continue;
     }
-    // 标签行（含 EXT-X-KEY / EXT-X-MAP / EXT-X-I-FRAME-STREAM-INF 等带 URI 的）需改写其中的 URI
     if (trimmed.startsWith('#')) {
       line = line.replace(/(URI=)("?)([^"\s,]+)\2/gi, (m, p1, q, uri) => {
         const abs = toAbsolute(uri, baseUrl);
@@ -60,7 +57,6 @@ function rewriteM3u8(text, baseUrl, proxyBase) {
       out.push(line);
       continue;
     }
-    // 已是代理地址则原样保留
     if (trimmed.includes('/api/stream')) {
       out.push(line);
       continue;
@@ -76,79 +72,137 @@ function rewriteM3u8(text, baseUrl, proxyBase) {
 }
 
 export async function handleStream(request, url, env) {
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        'Access-Control-Allow-Headers': '*',
+      },
+    });
+  }
+
   const target = url.searchParams.get('url');
   if (!target) return new Response('bad url', { status: 400 });
 
   const tu = safeUrl(target);
   if (!tu) return new Response('blocked or invalid url', { status: 403 });
 
-  // 注入源站自身的 Referer/Origin，绕过大多数防盗链校验
-  const referer = tu.origin + '/';
-  const headers = {
-    'User-Agent':
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    Referer: referer,
-    Origin: tu.origin,
-    Accept: '*/*',
-  };
-  // WebDAV：目标属于配置的 WEBDAV_BASE 域名时，注入 Basic Auth 以拉取受保护文件
+  // 判断是否为配置的 WebDAV 域名
+  let isWebdav = false;
+  let webdavAuth = '';
   if (env && env.WEBDAV_BASE && env.WEBDAV_USER) {
     try {
       const wb = new URL(env.WEBDAV_BASE);
       if (tu.host === wb.host) {
-        let token;
-        try { token = 'Basic ' + btoa(env.WEBDAV_USER + ':' + (env.WEBDAV_PASS || '')); }
-        catch (_) { token = 'Basic ' + btoa(unescape(encodeURIComponent(env.WEBDAV_USER + ':' + (env.WEBDAV_PASS || '')))); }
-        headers['Authorization'] = token;
+        isWebdav = true;
+        try {
+          webdavAuth = 'Basic ' + btoa(env.WEBDAV_USER + ':' + (env.WEBDAV_PASS || ''));
+        } catch (_) {
+          webdavAuth = 'Basic ' + btoa(unescape(encodeURIComponent(env.WEBDAV_USER + ':' + (env.WEBDAV_PASS || ''))));
+        }
       }
     } catch (_) { /* ignore */ }
   }
+
   const range = request.headers.get('range');
-  if (range) headers['Range'] = range;
+
+  // 构造两套请求头：一套模拟电视盒子播放器（IPTV 专用），一套模拟浏览器（点播站专用）
+  const buildHeaders = (mode) => {
+    const h = { Accept: '*/*' };
+    if (range) h['Range'] = range;
+    if (isWebdav && webdavAuth) {
+      h['Authorization'] = webdavAuth;
+      h['User-Agent'] = 'Mozilla/5.0';
+      return h;
+    }
+    if (mode === 'iptv') {
+      // 电视盒子播放器标识，且不带 Origin 头（防止触发直播 CDN 防盗链拒绝）
+      h['User-Agent'] = 'okhttp/4.12.0';
+      h['Referer'] = tu.origin + '/';
+    } else {
+      h['User-Agent'] =
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+      h['Referer'] = tu.origin + '/';
+      h['Origin'] = tu.origin;
+    }
+    return h;
+  };
+
+  // 非 WebDAV 且路径含直播特征时，优先使用播放器头；否则先用浏览器头，被拒后自动切换重试
+  const looksLikeLive = /\/(live|pltv|iptv|hls|tv)\b|\.m3u8/i.test(tu.pathname);
+  const firstMode = (!isWebdav && looksLikeLive) ? 'iptv' : 'browser';
+  const secondMode = firstMode === 'iptv' ? 'browser' : 'iptv';
 
   let up;
   try {
-    up = await fetchStream(tu.toString(), { headers, redirect: 'follow' });
+    up = await fetchStream(tu.toString(), { headers: buildHeaders(firstMode), redirect: 'follow' });
+    // 若遇 403/401/412 防盗链拒绝，自动切换另一套请求头重试一次
+    if (!isWebdav && (up.status === 403 || up.status === 401 || up.status === 412)) {
+      up = await fetchStream(tu.toString(), { headers: buildHeaders(secondMode), redirect: 'follow' });
+    }
   } catch (e) {
     const dbg = 'upstream error: ' + (e && e.message ? e.message : String(e)) + ' | url=' + tu.toString();
     return new Response(dbg, {
       status: 502,
-      headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-TMH-Error': dbg },
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Access-Control-Allow-Origin': '*',
+        'X-TMH-Error': dbg,
+      },
     });
   }
+
   if (!up.ok && up.status !== 206) {
     const dbg =
       'upstream status ' + up.status +
       ' | url=' + (up.url || tu.toString()) +
-      ' | ct=' + (up.headers.get('content-type') || '') +
-      ' | cf=' + (up.headers.get('cf-ray') || '');
+      ' | ct=' + (up.headers.get('content-type') || '');
     return new Response(dbg, {
       status: 502,
-      headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-TMH-Error': dbg },
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Access-Control-Allow-Origin': '*',
+        'X-TMH-Error': dbg,
+      },
     });
   }
 
   const finalBase = up.url || tu.toString();
   const ct = up.headers.get('content-type') || '';
-  const isM3u8 =
+  const cl = Number(up.headers.get('content-length') || '0');
+
+  let isM3u8 =
     /mpegurl|application\/x-m3u8|vnd\.apple\.mpegurl/i.test(ct) ||
     /\.m3u8(\?|#|$)/i.test(new URL(finalBase).pathname);
 
+  // 针对无 .m3u8 后缀且返回 text/plain 或未知类型的直播索引，读取文本嗅探是否以 #EXTM3U 开头
+  let prefetchedText = null;
+  if (!isM3u8 && !isWebdav && (cl === 0 || cl < 512 * 1024) && (/text\/plain|octet-stream|^$/i.test(ct))) {
+    const clone = up.clone();
+    const txt = await clone.text().catch(() => '');
+    if (txt.trimStart().startsWith('#EXTM3U')) {
+      isM3u8 = true;
+      prefetchedText = txt;
+    }
+  }
+
   if (isM3u8) {
-    const text = await up.text().catch(() => '');
+    const text = prefetchedText !== null ? prefetchedText : await up.text().catch(() => '');
     const proxyBase = url.origin + '/api/stream?url=';
     const rewritten = rewriteM3u8(text, finalBase, proxyBase);
     return new Response(rewritten, {
       status: 200,
       headers: {
-        'Content-Type': 'application/vnd.apple.mpegurl',
+        'Content-Type': 'application/vnd.apple.mpegurl; charset=utf-8',
         'Cache-Control': 'no-cache',
         'Access-Control-Allow-Origin': '*',
       },
     });
   }
 
-  // 其他媒体（mp4 / ts / key 等）直接流式转发，透传关键响应头以支持拖拽
+  // 其他媒体（mp4 / ts / flv / key 等）直接流式转发，透传关键响应头以支持拖拽
   const passHeaders = new Headers();
   for (const k of [
     'content-type',
