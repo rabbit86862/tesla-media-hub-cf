@@ -1,16 +1,17 @@
 /**
- * 播放器层：适配车载大屏触摸（含断点记忆与自动续播）
+ * 播放器层：适配车载大屏触摸（含断点记忆、自动续播与直播超时熔断）
  * 统一播放引擎（tesla-media-hub 内置播放库，基于 wody11/Tesla-VideoPlayer）：
  *   - 完全无 <video> 标签，纯 WebCodecs 解码 → Canvas 渲染
  *   - AppleCMS 点播：浏览器直连源站 HLS/MP4（不走服务端，零服务器负载）
- *   - IPTV 直播：浏览器拉取服务端 ffmpeg 转码推流的 MPEG-TS 流
+ *   - IPTV 直播：直连优先 + 8 秒首帧超时自动回退代理与多线路切换
  *   - 源站不支持 WebCodecs 或跨域受限时给出提示
  */
 
 const playerLayer = document.getElementById('player-layer');
-let iptvPlayer = null;     // 统一播放实例（tesla-media-hub 内置播放库），承载 IPTV 直播与 AppleCMS 点播
-let playCtx = null;        // AppleCMS 点播上下文：{ siteKey, vodName, plays, flagIdx, curEp, qualityIdx, urls, lastUrl, isLastEp }
-let startupTimer = null;   // 点播首帧超时诊断：黑屏无提示时给出可能原因
+let iptvPlayer = null;       // 统一播放实例（tesla-media-hub 内置播放库），承载 IPTV 直播与 AppleCMS 点播
+let playCtx = null;          // AppleCMS 点播上下文：{ siteKey, vodName, plays, flagIdx, curEp, qualityIdx, urls, lastUrl, isLastEp }
+let startupTimer = null;     // 首帧超时诊断定时器
+let iptvSessionId = 0;       // 直播会话令牌：防止快速切台或关闭播放器后异步实例残留窜台
 let lastFramePaused = false; // 末集/单集：已在最后一秒暂停画面，避免重复暂停与误触发续播
 const LAST_FRAME_PAUSE_SEC = 1; // 距离片尾不足该秒数时暂停在末帧
 
@@ -139,6 +140,8 @@ async function openPlayer(ctx) {
     }
   } catch (e) { /* ignore */ }
 
+  iptvSessionId++; // 作废可能正在异步初始化的直播会话
+
   // 销毁可能存在的播放实例
   if (iptvPlayer) {
     try { iptvPlayer.destroy(); } catch (e) { /* ignore */ }
@@ -185,9 +188,11 @@ async function openPlayer(ctx) {
 }
 
 /**
- * 打开 IPTV 频道播放（支持自动全屏 + 直连优先 + 多线路自动容错切换）
+ * 打开 IPTV 频道播放（支持自动全屏 + 直连优先 + 8 秒首帧超时熔断 + 多线路自动容错切换）
  */
 async function openIptvPlayer(ctx, isFallback = false) {
+  const mySession = ++iptvSessionId;
+
   try {
     const elem = document.documentElement;
     if (!document.fullscreenElement && !document.webkitFullscreenElement) {
@@ -219,6 +224,7 @@ async function openIptvPlayer(ctx, isFallback = false) {
   playerLayer.classList.remove('hidden');
   driveView.classList.add('hidden');
   iptvView.classList.remove('hidden');
+  if (host) host.innerHTML = ''; // 清理上一台残留画面
 
   if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
 
@@ -231,30 +237,18 @@ async function openIptvPlayer(ctx, isFallback = false) {
   const playUrl = (isFallback || isHttp) ? proxyUrl(ctx.streamUrl) : ctx.streamUrl;
   showToast('正在加载 ' + (ctx.name || '频道'));
 
-  try {
-    iptvPlayer = await window.IptvAdapter.createPlayer(host, playUrl, {
-      live: true,
-      onFirstFrame: () => {
-        const t = document.getElementById('toast');
-        if (t) t.classList.remove('show');
-      },
-      onStatus: (msg) => showToast(msg),
-      onError: (e) => {
-        if (!isFallback && !isHttp) {
-          showToast('直连受限，正在尝试代理通道拉流…');
-          openIptvPlayer(ctx, true);
-          return;
-        }
-        if (typeof ctx.onAllFailed === 'function') {
-          ctx.onAllFailed();
-          return;
-        }
-        showToast('直播加载失败：' + (e && e.message ? e.message : '频道暂无信号'));
-      },
-      onEnded: () => showToast('直播已结束'),
-    });
-  } catch (e) {
+  // 8 秒首帧超时熔断：防止海外直播源丢包导致无限转圈
+  let settled = false;
+  const triggerIptvFallbackOrNext = (reasonMsg) => {
+    if (settled || mySession !== iptvSessionId) return;
+    settled = true;
+    if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
+    if (iptvPlayer) {
+      try { iptvPlayer.destroy(); } catch (_) { /* ignore */ }
+      iptvPlayer = null;
+    }
     if (!isFallback && !isHttp) {
+      showToast('直连超时，正在尝试代理通道拉流…');
       openIptvPlayer(ctx, true);
       return;
     }
@@ -262,7 +256,44 @@ async function openIptvPlayer(ctx, isFallback = false) {
       ctx.onAllFailed();
       return;
     }
-    showToast('IPTV 播放失败：' + (e && e.message ? e.message : ''));
+    showToast('直播加载失败：' + (reasonMsg || '频道暂无信号'));
+  };
+
+  startupTimer = setTimeout(() => {
+    triggerIptvFallbackOrNext('连接超时');
+  }, 8000);
+
+  try {
+    const player = await window.IptvAdapter.createPlayer(host, playUrl, {
+      live: true,
+      onFirstFrame: () => {
+        if (settled || mySession !== iptvSessionId) return;
+        settled = true;
+        if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
+        const t = document.getElementById('toast');
+        if (t) t.classList.remove('show');
+      },
+      onStatus: (msg) => {
+        if (!settled && mySession === iptvSessionId) showToast(msg);
+      },
+      onError: (e) => {
+        triggerIptvFallbackOrNext(e && e.message);
+      },
+      onEnded: () => {
+        if (mySession !== iptvSessionId) return;
+        if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
+        showToast('直播已结束');
+      },
+    });
+
+    // 若播放器创建完成前用户已切台或触发超时，立即销毁迟到的实例
+    if (settled || mySession !== iptvSessionId) {
+      try { player && player.destroy(); } catch (_) { /* ignore */ }
+      return;
+    }
+    iptvPlayer = player;
+  } catch (e) {
+    triggerIptvFallbackOrNext(e && e.message);
   }
 }
 window.openIptvPlayer = openIptvPlayer;
@@ -489,6 +520,8 @@ async function cycleQuality() {
 }
 
 function closePlayer() {
+  iptvSessionId++; // 作废任何正在进行中的直播连接
+
   // 关闭播放器前强制保存最后一刻的观看进度
   if (playCtx && playCtx._curTime > 5) {
     saveVodProgress(playCtx, playCtx._curTime, playCtx._duration, true);
