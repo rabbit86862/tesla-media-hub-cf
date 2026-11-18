@@ -228,29 +228,44 @@ async function openIptvPlayer(ctx, isFallback = false) {
 
   if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
 
-  // ==================== YouTube 官方直播嵌入模式 ====================
+  // ==================== YouTube 官方直播模式 ====================
   if (/^youtube:\/\//i.test(ctx.streamUrl)) {
     const rawId = ctx.streamUrl.replace(/^youtube:\/\//i, '').trim();
-    // 支持频道 ID（自动追踪该频道当前 24h 直播）或指定视频 ID（video:xxx）
-    const embedSrc = rawId.startsWith('video:')
-      ? `https://www.youtube.com/embed/${encodeURIComponent(rawId.slice(6))}?autoplay=1&playsinline=1&rel=0`
-      : `https://www.youtube.com/embed/live_stream?channel=${encodeURIComponent(rawId)}&autoplay=1&playsinline=1&rel=0`;
+    // 拼接频道官方直播直达地址（自动跳转到该频道当前正在直播的页面，不受嵌入限制）
+    const directLiveUrl = rawId.startsWith('video:')
+      ? `https://m.youtube.com/watch?v=${encodeURIComponent(rawId.slice(6))}`
+      : rawId.startsWith('@')
+        ? `https://m.youtube.com/${encodeURIComponent(rawId)}/live`
+        : `https://m.youtube.com/channel/${encodeURIComponent(rawId)}/live`;
 
-    showToast('正在连接 YouTube 直播：' + (ctx.name || '频道'));
+    // 若指定了具体 video:ID，先尝试内嵌播放，并在顶部提供「直达原网页」兜底按钮
+    if (rawId.startsWith('video:')) {
+      const vid = rawId.slice(6);
+      const embedSrc = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(vid)}?autoplay=1&playsinline=1&rel=0`;
+      showToast('如提示不能观看，请点击下方按钮直达 YouTube 直播间');
 
-    const iframe = document.createElement('iframe');
-    iframe.src = embedSrc;
-    iframe.style.cssText = 'width:100%;height:100%;border:0;display:block;background:#000;';
-    iframe.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
-    iframe.allowFullscreen = true;
-    iframe.referrerPolicy = 'strict-origin-when-cross-origin';
-    iframe.onload = () => {
-      if (mySession !== iptvSessionId) return;
-      const t = document.getElementById('toast');
-      if (t) t.classList.remove('show');
-    };
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'position:relative;width:100%;height:100%;background:#000;';
+      wrap.innerHTML = `
+        <iframe src="${embedSrc}" style="width:100%;height:100%;border:0;display:block;" allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>
+        <a href="${directLiveUrl}" style="position:absolute;right:16px;bottom:16px;z-index:20;background:#cc0000;color:#fff;padding:10px 16px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;box-shadow:0 4px 12px rgba(0,0,0,0.5);">↗ 打开 YouTube 原生直播</a>
+      `;
+      if (host) host.appendChild(wrap);
+      if (typeof ctx.onSuccess === 'function') ctx.onSuccess();
+      return;
+    }
 
-    if (host) host.appendChild(iframe);
+    // 台湾/香港新闻台普遍禁止第三方 iframe 嵌入，直接引导/跳转至官方移动版直播间（100% 可播）
+    showToast('正在打开 ' + (ctx.name || 'YouTube 直播') + '…');
+    if (host) {
+      host.innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;color:#e6edf3;padding:20px;text-align:center;">
+          <div style="font-size:16px;color:#9da7b3;">该电视台已禁止第三方网页内嵌播放</div>
+          <a href="${directLiveUrl}" style="background:#cc0000;color:#fff;padding:14px 28px;border-radius:10px;font-size:16px;font-weight:600;text-decoration:none;">▶ 立即进入 ${esc(ctx.name || 'YouTube')} 官方直播间</a>
+          <div style="font-size:12px;color:#6e7681;">进入后点击视频右下角全屏图标即可铺满车机屏幕，按车机浏览器左上角「‹」可返回影视站</div>
+        </div>
+      `;
+    }
     if (typeof ctx.onSuccess === 'function') ctx.onSuccess();
     return;
   }
