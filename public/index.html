@@ -222,7 +222,7 @@
   </div>
 
   <script>
-    // 已验证可用的 HTTPS 自动更新订阅源（支持单链接 url 与多链接合并 urls）
+    // 已验证可用的 HTTPS 自动更新订阅源（支持单链接 url 与多镜像并发竞速 urls）
     const TV_SOURCES = [
       { name: '源1：Guovin 综合', url: 'https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/result.m3u' },
       { name: '源2：APTV 精品', url: 'https://testingcf.jsdelivr.net/gh/Kimentanm/aptv@master/m3u/iptv.m3u' },
@@ -231,9 +231,33 @@
       {
         name: '源5：Free-TV 两岸三地',
         urls: [
-          { url: 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_china.m3u8', group: '中国大陆', useProxy: true },
-          { url: 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_hong_kong.m3u8', group: '中国香港', useProxy: true },
-          { url: 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_taiwan.m3u8', group: '中国台湾', useProxy: true }
+          {
+            group: '中国大陆',
+            mirrors: [
+              'https://fastly.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_china.m3u8',
+              'https://gcore.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_china.m3u8',
+              'https://testingcf.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_china.m3u8',
+              '/api/stream?url=' + encodeURIComponent('https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_china.m3u8')
+            ]
+          },
+          {
+            group: '中国香港',
+            mirrors: [
+              'https://fastly.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_hong_kong.m3u8',
+              'https://gcore.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_hong_kong.m3u8',
+              'https://testingcf.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_hong_kong.m3u8',
+              '/api/stream?url=' + encodeURIComponent('https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_hong_kong.m3u8')
+            ]
+          },
+          {
+            group: '中国台湾',
+            mirrors: [
+              'https://fastly.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_taiwan.m3u8',
+              'https://gcore.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_taiwan.m3u8',
+              'https://testingcf.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_taiwan.m3u8',
+              '/api/stream?url=' + encodeURIComponent('https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_taiwan.m3u8')
+            ]
+          }
         ]
       }
     ];
@@ -273,36 +297,32 @@
       document.getElementById('tv-modal').classList.add('hidden');
     }
 
-    // 带 6 秒超时熔断的拉取函数（支持走同源 /api/stream 代理直连 GitHub）
-    async function fetchSingleM3uText(m3uUrl, forceRefresh, useProxy = false) {
-      const fetchWithTimeout = async (targetUrl) => {
+    // 多节点并发竞速拉取（12 秒超时，任意节点先返回有效列表即刻采用）
+    async function fetchM3uWithRace(urlList, forceRefresh) {
+      const fetchOne = async (targetUrl) => {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 6000);
+        const timer = setTimeout(() => controller.abort(), 12000);
         try {
           const res = await fetch(targetUrl, {
             cache: forceRefresh ? 'no-cache' : 'default',
             signal: controller.signal
           });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return await res.text();
+          const text = await res.text();
+          // 校验返回内容确实是有效的播放列表而非错误网页
+          if (!text || (!text.includes('#EXTINF') && !text.includes('http'))) {
+            throw new Error('无效列表内容');
+          }
+          return text;
         } finally {
           clearTimeout(timer);
         }
       };
 
-      if (useProxy) {
-        return await fetchWithTimeout('/api/stream?url=' + encodeURIComponent(m3uUrl));
+      if (urlList.length === 1) {
+        return await fetchOne(urlList[0]);
       }
-
-      try {
-        return await fetchWithTimeout(m3uUrl);
-      } catch (e) {
-        if (m3uUrl.includes('testingcf.jsdelivr.net')) {
-          const backupUrl = m3uUrl.replace('testingcf.jsdelivr.net', 'fastly.jsdelivr.net');
-          return await fetchWithTimeout(backupUrl);
-        }
-        throw e;
-      }
+      return await Promise.any(urlList.map(u => fetchOne(u)));
     }
 
     async function loadTvChannels(forceRefresh) {
@@ -318,13 +338,26 @@
       statusEl.textContent = '正在同步最新 HTTPS 频道列表…';
 
       try {
+        // 归一化任务：兼容单链接 url 与多镜像数组 mirrors
         const tasks = Array.isArray(currentSrc.urls)
-          ? currentSrc.urls.map(item => (typeof item === 'string' ? { url: item, group: '', useProxy: false } : item))
-          : [{ url: currentSrc.url, group: '', useProxy: !!currentSrc.useProxy }];
+          ? currentSrc.urls.map(item => ({
+              mirrors: item.mirrors || [item.url],
+              group: item.group || ''
+            }))
+          : [{
+              mirrors: currentSrc.url.includes('testingcf.jsdelivr.net')
+                ? [
+                    currentSrc.url,
+                    currentSrc.url.replace('testingcf.jsdelivr.net', 'fastly.jsdelivr.net'),
+                    currentSrc.url.replace('testingcf.jsdelivr.net', 'gcore.jsdelivr.net')
+                  ]
+                : [currentSrc.url],
+              group: ''
+            }];
 
         const results = await Promise.allSettled(
           tasks.map(async (t) => {
-            let text = await fetchSingleM3uText(t.url, forceRefresh, t.useProxy);
+            let text = await fetchM3uWithRace(t.mirrors, forceRefresh);
             if (t.group) {
               text = text.replace(/^#EXTINF:([^\r\n,]*)/gm, (match, attrs) => {
                 if (/group-title="[^"]*"/i.test(attrs)) {
