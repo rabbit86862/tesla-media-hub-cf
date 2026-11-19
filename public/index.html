@@ -206,6 +206,19 @@
 
   <script>
     const TV_SOURCES = [
+      {
+        name: 'vbskycn 直播',
+        urls: [
+          {
+            mirrors: [
+              'https://testingcf.jsdelivr.net/gh/vbskycn/iptv@master/tv/iptv4.m3u',
+              'https://fastly.jsdelivr.net/gh/vbskycn/iptv@master/tv/iptv4.m3u',
+              'https://gcore.jsdelivr.net/gh/vbskycn/iptv@master/tv/iptv4.m3u',
+              '/api/stream?url=' + encodeURIComponent('https://raw.githubusercontent.com/vbskycn/iptv/master/tv/iptv4.m3u')
+            ]
+          }
+        ]
+      },
       { name: 'Guovin 综合', url: 'https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/result.m3u' },
       { name: 'suxuang 精选', url: 'https://testingcf.jsdelivr.net/gh/suxuang/myIPTV@main/ipv4.m3u' },
       { name: 'APTV 精品', url: 'https://testingcf.jsdelivr.net/gh/Kimentanm/aptv@master/m3u/iptv.m3u' },
@@ -304,7 +317,7 @@
         const timer = setTimeout(() => controller.abort(), 12000);
         try {
           const res = await fetch(targetUrl, {
-            cache: forceRefresh ? 'no-cache' : 'default',
+            cache: 'no-cache',
             signal: controller.signal
           });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
