@@ -9,15 +9,12 @@
   <title>车载影视</title>
   <link rel="stylesheet" href="css/style.css">
   <style>
-    /* 适配剧场无边框容器的动态视口锁定 */
     html, body {
       height: 100dvh;
       margin: 0;
       padding: 0;
       background: #0f1115;
     }
-
-    /* 顶部栏右侧工具组 */
     #topbar {
       display: flex;
       align-items: center;
@@ -52,8 +49,6 @@
       background: #2b3342;
       border-color: #3e88f7;
     }
-
-    /* 强制全屏状态下的视口锁定，消除黑边与溢出 */
     html:fullscreen, html:-webkit-full-screen,
     body:fullscreen, body:-webkit-full-screen {
       width: 100vw !important;
@@ -82,7 +77,6 @@
         <span id="page-sub" class="page-sub"></span>
       </div>
     </div>
-    <!-- 顶部续播、直播与全屏控制区 -->
     <div class="fs-actions">
       <button class="fs-btn" onclick="resumeLastWatch(0)" style="border-color:#3fb950;color:#3fb950;">🕒 继续观看</button>
       <button class="fs-btn" onclick="openTvModal()" style="border-color:#00b4d8;color:#00b4d8;">📺 电视直播</button>
@@ -103,17 +97,16 @@
             </svg>
           </button>
           <button class="quality-btn" id="btn-quality" style="display:none" onclick="cycleQuality()">清晰度</button>
-          <!-- 播放器内部全屏切换按钮 -->
+          <!-- 直播多线路手动切换按钮 -->
+          <button class="quality-btn" id="btn-tv-line" style="display:none;border-color:#00b4d8;color:#00b4d8;" onclick="switchNextTvLine()">⏭ 换线路</button>
           <button class="quality-btn" id="btn-player-fs" onclick="toggleWebFullscreen()">⛶ 全屏</button>
         </div>
         <div class="player-title" id="player-title"></div>
       </div>
       <div id="player-box">
-        <!-- AppleCMS 点播：车机本地 WebCodecs 解码到 Canvas -->
         <div id="drive-view" class="drive-view hidden">
           <div id="tesla-host"></div>
         </div>
-        <!-- IPTV：WebCodecs 直播解码 & YouTube 官方直播嵌入 -->
         <div id="iptv-view" class="drive-view hidden">
           <div id="iptv-host"></div>
         </div>
@@ -122,13 +115,10 @@
     </div>
   </div>
 
-  <!-- 模态框 -->
   <div id="modal" class="modal hidden"></div>
-
   <div id="toast" class="toast"></div>
 
   <script>
-    // 1. 网页原生 Fullscreen API 切换
     function toggleWebFullscreen() {
       const elem = document.documentElement;
       const isFs = document.fullscreenElement || document.webkitFullscreenElement;
@@ -147,7 +137,6 @@
       }
     }
 
-    // 2. 关闭播放器（同步刷新首页续播卡片）
     function exitAndClosePlayer() {
       if (typeof closePlayer === 'function') {
         closePlayer();
@@ -157,7 +146,6 @@
       }
     }
 
-    // 监听全屏状态变化，同步更新按钮文字与控制栏自动隐藏
     function syncFsButtonText() {
       const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
       const label = isFs ? '✕ 退出全屏' : '⛶ 全屏';
@@ -167,7 +155,6 @@
       if (playerBtn) playerBtn.textContent = label;
     }
 
-    // 全屏状态下：轻触屏幕显示上下控制栏，3 秒无操作自动隐藏
     let ctrlHideTimer = null;
     function wakeFullscreenControls() {
       const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
@@ -193,7 +180,7 @@
     });
   </script>
 
-  <!-- 电视直播频道弹窗（触屏直选源 + 多线路容错 + YouTube 新闻直播） -->
+  <!-- 电视直播频道弹窗 -->
   <div id="tv-modal" class="modal hidden" onclick="if(event.target===this)closeTvModal()">
     <div class="modal-body" style="max-width:760px;">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
@@ -204,30 +191,29 @@
         </div>
       </div>
 
-      <!-- 订阅源触屏切换按钮（自动换行 + 紧凑间距，避免边缘裁切） -->
       <div id="tv-source-bar" class="tab-bar" style="display:flex;flex-wrap:wrap;gap:6px;padding:6px 0;overflow:visible;"></div>
 
-      <!-- 频道搜索框 -->
       <div class="search-row" style="margin-bottom:4px;">
-        <input id="tv-search-input" type="text" placeholder="搜索频道（如：CCTV、卫视、4K、TVBS、中天、TVB…）" oninput="renderTvChannels()">
+        <input id="tv-search-input" type="text" placeholder="搜索频道（如：CCTV、卫视、东方卫视4K、TVBS、TVB…）" oninput="renderTvChannels()">
       </div>
 
-      <!-- 分组标签栏 -->
       <div id="tv-group-bar" class="tab-bar" style="padding:2px 0 6px;"></div>
 
-      <!-- 状态提示与频道网格 -->
       <div id="tv-status" class="tip" style="text-align:center;padding:8px 0;"></div>
       <div id="tv-channel-grid" class="ep-grid" style="grid-template-columns:repeat(auto-fill,minmax(135px,1fr));max-height:48vh;overflow-y:auto;padding-bottom:4px;"></div>
     </div>
   </div>
 
   <script>
-    // 自动更新订阅源（支持内置 YouTube 频道列表 channels、单链接 url 与多镜像并发竞速 mirrors）
     const TV_SOURCES = [
+      { name: 'Guovin 综合', url: 'https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/result.m3u' },
+      { name: 'YanG 央视卫视', url: 'https://testingcf.jsdelivr.net/gh/YanG-1989/m3u@main/Gather.m3u' },
+      { name: 'suxuang 精选', url: 'https://testingcf.jsdelivr.net/gh/suxuang/myIPTV@main/ipv4.m3u' },
+      { name: 'APTV 精品', url: 'https://testingcf.jsdelivr.net/gh/Kimentanm/aptv@master/m3u/iptv.m3u' },
+      { name: 'ZBDS 加速', url: 'https://live.zbds.top/tv/iptv4.m3u' },
       {
         name: 'YouTube 新闻',
         channels: [
-          // 台湾新闻台
           { name: 'TVBS 新闻台', group: '台湾新闻', url: 'youtube://@TVBSNEWS01' },
           { name: '中天新闻台', group: '台湾新闻', url: 'youtube://@CtiNews' },
           { name: '三立 LIVE 新闻', group: '台湾新闻', url: 'youtube://@SETnews' },
@@ -236,49 +222,14 @@
           { name: '台视新闻台', group: '台湾新闻', url: 'youtube://@TTV_NEWS' },
           { name: '华视新闻台', group: '台湾新闻', url: 'youtube://@CTS_NEWS' },
           { name: '公视新闻网', group: '台湾新闻', url: 'youtube://@PNNPTS' },
-          // 香港新闻台
           { name: 'TVB 无綫新闻', group: '香港新闻', url: 'youtube://@TVBNews' },
           { name: '凤凰卫视资讯', group: '香港新闻', url: 'youtube://@ifeng-tv' },
-          // 国际新闻台
           { name: 'CNA 亚洲新闻台', group: '国际新闻', url: 'youtube://@channelnewsasia' },
           { name: 'Bloomberg 彭博财经', group: '国际新闻', url: 'youtube://@markets' },
           { name: 'Sky News 英国天空', group: '国际新闻', url: 'youtube://@SkyNews' },
           { name: 'Al Jazeera 半岛英语', group: '国际新闻', url: 'youtube://@aljazeeraenglish' },
           { name: 'DW News 德国之声', group: '国际新闻', url: 'youtube://@dwnews' },
           { name: 'France 24 英语', group: '国际新闻', url: 'youtube://@FRANCE24English' }
-        ]
-      },
-      { name: 'Guovin 综合', url: 'https://testingcf.jsdelivr.net/gh/Guovin/iptv-api@gd/output/result.m3u' },
-      { name: 'APTV 精品', url: 'https://testingcf.jsdelivr.net/gh/Kimentanm/aptv@master/m3u/iptv.m3u' },
-      { name: 'ZBDS 加速', url: 'https://live.zbds.top/tv/iptv4.m3u' },
-      { name: 'ChinaIPTV', url: 'https://testingcf.jsdelivr.net/gh/hujingguang/ChinaIPTV@main/cnTV_AutoUpdate.m3u8' },
-      {
-        name: 'Free-TV 两岸三地',
-        urls: [
-          {
-            group: '中国大陆',
-            mirrors: [
-              'https://fastly.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_china.m3u8',
-              'https://gcore.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_china.m3u8',
-              '/api/stream?url=' + encodeURIComponent('https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_china.m3u8')
-            ]
-          },
-          {
-            group: '中国香港',
-            mirrors: [
-              'https://fastly.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_hong_kong.m3u8',
-              'https://gcore.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_hong_kong.m3u8',
-              '/api/stream?url=' + encodeURIComponent('https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_hong_kong.m3u8')
-            ]
-          },
-          {
-            group: '中国台湾',
-            mirrors: [
-              'https://fastly.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_taiwan.m3u8',
-              'https://gcore.jsdelivr.net/gh/Free-TV/IPTV@master/playlists/playlist_taiwan.m3u8',
-              '/api/stream?url=' + encodeURIComponent('https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_taiwan.m3u8')
-            ]
-          }
         ]
       }
     ];
@@ -318,7 +269,6 @@
       document.getElementById('tv-modal').classList.add('hidden');
     }
 
-    // 多节点并发竞速拉取（12 秒超时，任意节点先返回有效列表即刻采用）
     async function fetchM3uWithRace(urlList, forceRefresh) {
       const fetchOne = async (targetUrl) => {
         const controller = new AbortController();
@@ -355,7 +305,6 @@
         gridEl.innerHTML = '';
       }
 
-      // 1. 内置 YouTube 频道列表直接秒加载
       if (Array.isArray(currentSrc.channels)) {
         allTvChannels = currentSrc.channels.map(c => ({
           name: c.name,
@@ -368,7 +317,6 @@
         return;
       }
 
-      // 2. 外部 M3U 订阅源拉取
       statusEl.style.display = 'block';
       statusEl.textContent = '正在同步最新频道列表…';
 
@@ -428,14 +376,15 @@
       }
     }
 
-    // 兼容解析标准 M3U (#EXTINF) 与 TVBox TXT (#genre#) 双格式，完整保留 4K 频道并智能排序线路
     function parseAndGroupM3u(text) {
       const lines = text.split(/\r?\n/);
       const channelMap = new Map();
       let currentMeta = null;
       let currentTxtGroup = '精选频道';
 
-      const addChannelUrl = (name, group, url) => {
+      const addChannelUrl = (name, group, rawUrl) => {
+        // 剥离订阅源中常见的 $超清 / $线路1 等备注尾巴
+        const url = String(rawUrl || '').split('$')[0].trim();
         if (!/^(https?|youtube):\/\//i.test(url)) return;
 
         const cleanName = name.trim() || '未知频道';
@@ -445,9 +394,8 @@
         }
         const item = channelMap.get(cleanName);
         if (!item.urls.includes(url)) {
-          const isHevcOr4k = /hevc|h265|265|4k/i.test(cleanName + ' ' + url);
-          // 优先将常规 https/youtube 线路排在最前，4K/HEVC 及 http 代理线路依次顺延
-          if (/^(https|youtube):\/\//i.test(url) && !isHevcOr4k) {
+          // 所有 https:// 线路（含 4K）一律置于最前（车机国内 IP 直连不被封），http:// 排在后面
+          if (/^(https|youtube):\/\//i.test(url)) {
             item.urls.unshift(url);
           } else {
             item.urls.push(url);
@@ -525,7 +473,6 @@
       }).join('');
     }
 
-    // 记录每个频道上次成功播放的 URL，下次点开优先使用
     const TV_GOOD_URL_KEY = 'tesla_tv_good_urls_v1';
     function getSavedGoodUrl(channelName) {
       try {
@@ -561,6 +508,16 @@
       tryPlayCurrentQueueLine();
     }
 
+    function switchNextTvLine() {
+      if (!currentTvQueue || currentTvQueue.urls.length <= 1) {
+        if (typeof showToast === 'function') showToast('当前频道无更多备用线路');
+        return;
+      }
+      currentTvQueue.index = (currentTvQueue.index + 1) % currentTvQueue.urls.length;
+      tryPlayCurrentQueueLine();
+    }
+    window.switchNextTvLine = switchNextTvLine;
+
     function tryPlayCurrentQueueLine() {
       if (!currentTvQueue) return;
       const { name, urls, index } = currentTvQueue;
@@ -571,12 +528,13 @@
         window.openIptvPlayer({
           name: name + titleSuffix,
           streamUrl: url,
+          hasNextLine: urls.length > 1,
           onSuccess: () => saveGoodUrl(name, url),
           onAllFailed: () => {
             if (currentTvQueue && currentTvQueue.index + 1 < currentTvQueue.urls.length) {
               currentTvQueue.index++;
               if (typeof showToast === 'function') {
-                showToast(`线路 ${index + 1} 无响应，自动切换线路 ${currentTvQueue.index + 1}…`);
+                showToast(`线路 ${index + 1} 无信号，自动切至线路 ${currentTvQueue.index + 1}…`);
               }
               tryPlayCurrentQueueLine();
             } else {
